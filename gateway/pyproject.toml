@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mendicant-gateway"
+version = "5.0.0"
+description = "Mendicant Bias Gateway — REST API for the Mendicant intelligence system"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+    { name = "Mendicant Bias Project" },
+]
+keywords = ["ai", "agents", "gateway", "fastapi", "mendicant"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "mendicant-core>=5.0.0",
+    "mendicant-runtime>=5.0.0",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
+    "pydantic>=2.0",
+]
+
+[project.scripts]
+mendicant-gateway = "mendicant_gateway.app:main"
+
+[project.optional-dependencies]
+dev = [
+    "httpx>=0.27.0",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mendicant_gateway"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

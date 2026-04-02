@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mendicant-core"
+version = "5.0.0"
+description = "Mendicant Bias — Intelligence middleware for AI agent systems"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+    { name = "Mendicant Bias Project" },
+]
+keywords = ["ai", "agents", "middleware", "langgraph", "mendicant"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "pydantic>=2.0",
+    "langchain>=1.0.0",
+    "langchain-core>=0.3.0",
+    "langgraph>=0.2.0",
+]
+
+[project.optional-dependencies]
+embeddings = [
+    "sentence-transformers>=3.0.0",
+]
+tokens = [
+    "tiktoken>=0.8.0",
+]
+llm = [
+    "langchain-openai>=0.3.0",
+    "langchain-anthropic>=0.3.0",
+]
+all = [
+    "mendicant-core[embeddings,tokens,llm]",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mendicant_core"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

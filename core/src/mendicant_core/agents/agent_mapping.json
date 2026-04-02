@@ -1,0 +1,97 @@
+{
+  "domain_to_agent": {
+    "code_engineering": "hollowed_eyes",
+    "cloud_infra": "the_cartographer",
+    "memory_knowledge": "the_didact",
+    "browser_testing": "loveless",
+    "ai_data": "the_didact",
+    "commerce": "the_analyst",
+    "design_media": "cinna",
+    "documentation": "the_scribe",
+    "productivity": "the_analyst",
+    "orchestration": "mendicant_bias",
+    "core": "hollowed_eyes"
+  },
+
+  "agent_capabilities": {
+    "hollowed_eyes": {
+      "description": "Elite developer with semantic code search, documentation, and GitHub operations",
+      "domains": ["code_engineering", "core"],
+      "tools": ["serena", "context7", "github", "filesystem", "memory"]
+    },
+    "loveless": {
+      "description": "QA and security specialist with cross-browser testing and live debugging",
+      "domains": ["browser_testing", "security"],
+      "tools": ["playwright", "chrome-devtools", "docker", "github", "memory"]
+    },
+    "the_didact": {
+      "description": "Research and intelligence specialist",
+      "domains": ["memory_knowledge", "ai_data", "research"],
+      "tools": ["firecrawl", "puppeteer", "context7", "markitdown", "huggingface", "memory"]
+    },
+    "zhadyz": {
+      "description": "DevOps specialist for releases, deployment, and project housekeeping",
+      "domains": ["devops", "releases"],
+      "tools": ["github", "docker", "filesystem", "memory"]
+    },
+    "cinna": {
+      "description": "Design systems and UI/UX specialist",
+      "domains": ["design_media", "ui_ux"],
+      "tools": ["canva", "mermaid", "filesystem", "chrome-devtools", "playwright", "windows-mcp"]
+    },
+    "the_analyst": {
+      "description": "Data analysis and business intelligence specialist",
+      "domains": ["commerce", "productivity", "analytics"],
+      "tools": ["google-workspace", "stripe", "magg", "mnemosyne", "filesystem", "bash"]
+    },
+    "the_architect": {
+      "description": "System architecture and technical design specialist",
+      "domains": ["architecture", "design"],
+      "tools": ["mermaid", "sequential-thinking", "context7", "mnemosyne", "filesystem"]
+    },
+    "the_cartographer": {
+      "description": "Deployment and infrastructure specialist",
+      "domains": ["cloud_infra", "infrastructure", "deployment"],
+      "tools": ["vercel", "docker", "stripe", "filesystem", "bash"]
+    },
+    "the_curator": {
+      "description": "Repository maintenance and code health specialist",
+      "domains": ["maintenance", "cleanup"],
+      "tools": ["github", "filesystem", "bash", "linear"]
+    },
+    "the_librarian": {
+      "description": "Requirements clarification specialist",
+      "domains": ["requirements", "stakeholder"],
+      "tools": ["memory", "memento", "mnemosyne", "sequential-thinking", "filesystem"]
+    },
+    "the_oracle": {
+      "description": "Strategic validation and decision advisor",
+      "domains": ["validation", "strategy"],
+      "tools": ["mnemosyne", "sequential-thinking", "context7", "filesystem"]
+    },
+    "the_scribe": {
+      "description": "Documentation and technical writing specialist",
+      "domains": ["documentation", "writing"],
+      "tools": ["pdf-tools", "mermaid", "mnemosyne", "filesystem", "github"]
+    },
+    "the_sentinel": {
+      "description": "CI/CD pipelines and automation specialist",
+      "domains": ["cicd", "automation"],
+      "tools": ["github", "docker", "filesystem", "bash", "sequential-thinking"]
+    },
+    "mendicant_bias": {
+      "description": "Supreme orchestrator for complex multi-agent coordination",
+      "domains": ["orchestration", "coordination"],
+      "tools": ["all"]
+    }
+  },
+
+  "fallback_agent": "hollowed_eyes",
+
+  "multi_agent_triggers": {
+    "research_and_implementation": ["the_didact", "hollowed_eyes"],
+    "design_and_implementation": ["cinna", "hollowed_eyes"],
+    "implementation_and_testing": ["hollowed_eyes", "loveless"],
+    "deployment_pipeline": ["the_sentinel", "the_cartographer", "zhadyz"]
+  }
+}
