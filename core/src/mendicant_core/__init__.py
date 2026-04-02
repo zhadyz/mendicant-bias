@@ -38,6 +38,12 @@ Named after Mendicant Bias, the Forerunner Contender-class AI from Halo.
 __version__ = "5.0.0"
 
 from mendicant_core.config import MendicantConfig
+from mendicant_core.memory import (
+    MemoryData,
+    MemoryInjector,
+    MemoryStore,
+    MemoryUpdater,
+)
 from mendicant_core.middleware import (
     AdaptiveLearningMiddleware,
     ContextBudgetMiddleware,
@@ -51,6 +57,12 @@ from mendicant_core.middleware import (
 __all__ = [
     "__version__",
     "MendicantConfig",
+    # Memory
+    "MemoryData",
+    "MemoryInjector",
+    "MemoryStore",
+    "MemoryUpdater",
+    # Middleware
     "SemanticToolRouterMiddleware",
     "VerificationMiddleware",
     "AdaptiveLearningMiddleware",

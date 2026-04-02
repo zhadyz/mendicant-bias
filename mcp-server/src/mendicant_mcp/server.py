@@ -17,6 +17,10 @@ mendicant_record_pattern  — FR3 Adaptive Learning: record a completed task pat
 mendicant_status          — System status and middleware configuration
 mendicant_list_agents     — List all available named agents
 mendicant_get_agent       — Get a specific agent profile by name or domain
+mendicant_remember        — Store a fact in conversational memory
+mendicant_recall          — Retrieve facts from memory by query or category
+mendicant_forget          — Remove a fact from memory by ID
+mendicant_memory_status   — Get memory statistics and health
 
 Usage
 -----
@@ -53,6 +57,7 @@ _pattern_store: Any | None = None
 _agent_loader: Any | None = None
 _adaptive_mw: Any | None = None
 _context_budget_mw: Any | None = None
+_memory_store: Any | None = None
 
 
 def _load_yaml_config() -> dict[str, Any]:
@@ -215,6 +220,24 @@ def _get_context_budget_mw():
     return _context_budget_mw
 
 
+def _get_memory_store():
+    """Lazily initialize and return a MemoryStore instance."""
+    global _memory_store
+    if _memory_store is None:
+        from mendicant_core.memory import MemoryStore
+
+        # Check config for custom storage path, fallback to default
+        storage_path = ".mendicant/memory.json"
+        try:
+            raw = _load_yaml_config()
+            storage_path = raw.get("memory", {}).get("storage_path", storage_path)
+        except Exception:  # noqa: BLE001
+            pass
+
+        _memory_store = MemoryStore(storage_path=storage_path)
+    return _memory_store
+
+
 # ---------------------------------------------------------------------------
 # MCP Server
 # ---------------------------------------------------------------------------
@@ -223,7 +246,8 @@ app = Server("mendicant-bias")
 
 # Server instructions — read by Claude Code to understand how to use Mendicant tools
 INSTRUCTIONS = """\
-Mendicant Bias is an intelligence middleware system with five engines (FR1-FR5):
+Mendicant Bias is an intelligence middleware system with five engines (FR1-FR5) \
+plus a conversational memory system:
 
 - mendicant_classify_task (FR5): Classify tasks early to set strategy flags. \
 Returns task_type, verification/subagent/thinking flags. Call this first.
@@ -240,8 +264,16 @@ Call after task completion with outcome.
 - mendicant_list_agents / mendicant_get_agent: Discover named specialist agents \
 (hollowed_eyes for code, the_didact for research, loveless for QA, etc.)
 - mendicant_status: Check middleware configuration and system health.
+- mendicant_remember: Store a fact in persistent conversational memory.
+- mendicant_recall: Retrieve facts from memory by query or category.
+- mendicant_forget: Remove a specific fact from memory.
+- mendicant_memory_status: Get memory statistics and health.
 
-Recommended workflow: classify_task → route_tools → execute → verify → record_pattern\
+Recommended workflow: classify_task → route_tools → execute → verify → record_pattern
+
+Memory tools persist across sessions. Use mendicant_remember to store user preferences, \
+project context, and learned facts. Use mendicant_recall at the start of conversations \
+to load relevant context.\
 """
 
 
@@ -463,6 +495,92 @@ async def list_tools() -> list[Tool]:
                         "description": "Domain to look up the assigned agent for (e.g. 'code_engineering').",
                     },
                 },
+            },
+        ),
+        # ----- Memory tools -----
+        Tool(
+            name="mendicant_remember",
+            description=(
+                "Store a fact in Mendicant Bias conversational memory. "
+                "Facts are persisted across sessions and can be recalled "
+                "later. Deduplicated by content — storing a duplicate "
+                "updates confidence instead of creating a new entry."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "The fact to remember (a concise statement).",
+                    },
+                    "category": {
+                        "type": "string",
+                        "enum": ["preference", "knowledge", "context", "behavior", "goal"],
+                        "description": "Fact category. Default: 'knowledge'.",
+                    },
+                    "confidence": {
+                        "type": "number",
+                        "description": "Confidence 0.0-1.0. Default: 0.8.",
+                    },
+                },
+                "required": ["content"],
+            },
+            _meta=_ALWAYS_LOAD,
+        ),
+        Tool(
+            name="mendicant_recall",
+            description=(
+                "Recall facts from Mendicant Bias conversational memory. "
+                "Optionally filter by a keyword query or category. Returns "
+                "matching facts sorted by relevance and confidence."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Optional keyword query to search facts.",
+                    },
+                    "category": {
+                        "type": "string",
+                        "enum": ["preference", "knowledge", "context", "behavior", "goal"],
+                        "description": "Optional category filter.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max facts to return. Default: 10.",
+                    },
+                },
+            },
+            _meta=_ALWAYS_LOAD,
+        ),
+        Tool(
+            name="mendicant_forget",
+            description=(
+                "Remove a specific fact from Mendicant Bias conversational "
+                "memory by its fact ID."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "fact_id": {
+                        "type": "string",
+                        "description": "The ID of the fact to remove.",
+                    },
+                },
+                "required": ["fact_id"],
+            },
+        ),
+        Tool(
+            name="mendicant_memory_status",
+            description=(
+                "Get statistics about Mendicant Bias conversational memory, "
+                "including total facts, category breakdown, average confidence, "
+                "and last update time."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
             },
         ),
     ]
@@ -866,6 +984,101 @@ def _get_agent(name: str | None = None, domain: str | None = None) -> dict[str, 
 
 
 # ---------------------------------------------------------------------------
+# Memory tool implementations
+# ---------------------------------------------------------------------------
+
+
+def _remember(
+    content: str,
+    category: str = "knowledge",
+    confidence: float = 0.8,
+) -> dict[str, Any]:
+    """Store a fact in conversational memory."""
+    store = _get_memory_store()
+
+    # Validate category
+    valid_categories = {"preference", "knowledge", "context", "behavior", "goal"}
+    if category not in valid_categories:
+        category = "knowledge"
+
+    # Clamp confidence
+    confidence = max(0.0, min(1.0, confidence))
+
+    fact = store.add_fact(
+        content=content,
+        category=category,
+        confidence=confidence,
+        source="mcp_tool",
+    )
+
+    return {
+        "fact_id": fact.id,
+        "stored": True,
+        "category": fact.category,
+        "confidence": fact.confidence,
+    }
+
+
+def _recall(
+    query: str | None = None,
+    category: str | None = None,
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Recall facts from conversational memory."""
+    store = _get_memory_store()
+
+    if query:
+        # Keyword search
+        facts = store.search_facts(query, limit=limit)
+        # Apply category filter if provided
+        if category:
+            facts = [f for f in facts if f.category == category]
+    elif category:
+        # Category-only filter
+        facts = store.get_facts(category=category)[:limit]
+    else:
+        # Return all, sorted by confidence
+        facts = store.get_facts()
+        facts = sorted(facts, key=lambda f: -f.confidence)[:limit]
+
+    # Build context summary
+    data = store.load()
+    context = {
+        "top_of_mind": data.user.top_of_mind.summary or None,
+        "work_context": data.user.work_context.summary or None,
+    }
+
+    return {
+        "facts": [
+            {
+                "id": f.id,
+                "content": f.content,
+                "category": f.category,
+                "confidence": f.confidence,
+                "created_at": f.created_at,
+                "source": f.source,
+            }
+            for f in facts
+        ],
+        "context": context,
+        "total_returned": len(facts),
+    }
+
+
+def _forget(fact_id: str) -> dict[str, Any]:
+    """Remove a fact from conversational memory."""
+    store = _get_memory_store()
+    removed = store.remove_fact(fact_id)
+    return {"removed": removed, "fact_id": fact_id}
+
+
+def _memory_status() -> dict[str, Any]:
+    """Return memory statistics."""
+    store = _get_memory_store()
+    return store.get_stats()
+
+
+# ---------------------------------------------------------------------------
 # MCP call_tool dispatcher
 # ---------------------------------------------------------------------------
 
@@ -934,6 +1147,31 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             agent_name = arguments.get("name")
             agent_domain = arguments.get("domain")
             result = _get_agent(name=agent_name, domain=agent_domain)
+
+        elif name == "mendicant_remember":
+            content = arguments.get("content", "")
+            if not content:
+                result = {"error": "content is required"}
+            else:
+                category = arguments.get("category", "knowledge")
+                confidence = float(arguments.get("confidence", 0.8))
+                result = _remember(content, category, confidence)
+
+        elif name == "mendicant_recall":
+            query = arguments.get("query")
+            category = arguments.get("category")
+            limit = int(arguments.get("limit", 10))
+            result = _recall(query=query, category=category, limit=limit)
+
+        elif name == "mendicant_forget":
+            fact_id = arguments.get("fact_id", "")
+            if not fact_id:
+                result = {"error": "fact_id is required"}
+            else:
+                result = _forget(fact_id)
+
+        elif name == "mendicant_memory_status":
+            result = _memory_status()
 
         else:
             result = {"error": f"Unknown tool: {name}"}
