@@ -8,19 +8,21 @@ orchestration and pattern storage as MCP tools over stdio transport.
 
 Tools
 -----
-mendicant_classify_task   — FR5 Smart Task Router: classify a task and get runtime flags
-mendicant_route_tools     — FR1 Semantic Tool Router: find relevant tools for a query
-mendicant_verify          — FR2 Verification Gate: two-stage blind LLM quality check
-mendicant_compress        — FR4 Context Budget: compress messages to fit a token budget
-mendicant_recommend       — FR3 Adaptive Learning: find similar historical patterns
-mendicant_record_pattern  — FR3 Adaptive Learning: record a completed task pattern
-mendicant_status          — System status and middleware configuration
-mendicant_list_agents     — List all available named agents
-mendicant_get_agent       — Get a specific agent profile by name or domain
-mendicant_remember        — Store a fact in conversational memory
-mendicant_recall          — Retrieve facts from memory by query or category
-mendicant_forget          — Remove a fact from memory by ID
-mendicant_memory_status   — Get memory statistics and health
+mendicant_session_init       — Initialize/resume session with memory + state
+mendicant_classify_task      — FR5 Smart Task Router: classify a task and get runtime flags
+mendicant_route_tools        — FR1 Semantic Tool Router: find relevant tools for a query
+mendicant_verify             — FR2 Verification Gate: two-stage blind LLM quality check
+mendicant_compress           — FR4 Context Budget: compress messages to fit a token budget
+mendicant_optimize_context   — Evolved FR4: semantic value ranking + priority compression
+mendicant_recommend          — FR3 Adaptive Learning: find similar historical patterns
+mendicant_record_pattern     — FR3 Adaptive Learning: record a completed task pattern
+mendicant_status             — System status and middleware configuration
+mendicant_list_agents        — List all available named agents
+mendicant_get_agent          — Get a specific agent profile by name or domain
+mendicant_remember           — Store a fact in conversational memory
+mendicant_recall             — Retrieve facts from memory by query or category
+mendicant_forget             — Remove a fact from memory by ID
+mendicant_memory_status      — Get memory statistics and health
 
 Usage
 -----
@@ -58,6 +60,7 @@ _agent_loader: Any | None = None
 _adaptive_mw: Any | None = None
 _context_budget_mw: Any | None = None
 _memory_store: Any | None = None
+_context_optimizer: Any | None = None
 
 
 def _load_yaml_config() -> dict[str, Any]:
@@ -220,6 +223,23 @@ def _get_context_budget_mw():
     return _context_budget_mw
 
 
+def _get_context_optimizer():
+    """Lazily initialize and return a ContextOptimizer instance."""
+    global _context_optimizer
+    if _context_optimizer is None:
+        from mendicant_core.middleware.context_optimizer import ContextOptimizer
+
+        cfg = _get_config()
+        # Use context_budget config for defaults where sensible
+        _context_optimizer = ContextOptimizer(
+            semantic_weight=0.6,
+            recency_weight=0.3,
+            role_weight=0.1,
+            embedding_model=cfg.semantic_tool_router.embedding_model,
+        )
+    return _context_optimizer
+
+
 def _get_memory_store():
     """Lazily initialize and return a MemoryStore instance."""
     global _memory_store
@@ -246,17 +266,24 @@ app = Server("mendicant-bias")
 
 # Server instructions — read by Claude Code to understand how to use Mendicant tools
 INSTRUCTIONS = """\
-Mendicant Bias is an intelligence middleware system with five engines (FR1-FR5) \
-plus a conversational memory system:
+Mendicant Bias is an intelligence middleware system with five engines (FR1-FR5), \
+conversational memory, session management, and semantic context optimization:
 
+- mendicant_session_init: Initialize or resume a session. Loads memory, returns \
+cached classification and pending verifications. Call at conversation start.
 - mendicant_classify_task (FR5): Classify tasks early to set strategy flags. \
-Returns task_type, verification/subagent/thinking flags. Call this first.
+Returns task_type, verification/subagent/thinking flags.
 - mendicant_route_tools (FR1): Find relevant tools by semantic similarity. \
 Use when selecting which tools to apply for a task.
 - mendicant_verify (FR2): Two-stage blind quality gate. Run after code writes \
-or critical operations to catch errors before reporting to user.
-- mendicant_compress (FR4): Compress messages to fit token budgets. Use when \
-context is getting large.
+or critical operations to catch errors before reporting to user. Also runs \
+automatically via pre-commit hooks for CRITICAL_CODE tasks.
+- mendicant_compress (FR4): Compress messages to fit token budgets using \
+age-based strategies (key_fields, statistical_summary, truncation).
+- mendicant_optimize_context: Semantic value ranking for context management. \
+Ranks messages by importance (semantic relevance to current query, recency, \
+role weight) and compresses lowest-priority first. Use instead of \
+mendicant_compress when you want intelligent context optimization.
 - mendicant_recommend (FR3): Find similar historical patterns that succeeded. \
 Use to inform strategy on familiar-looking tasks.
 - mendicant_record_pattern (FR3): Record completed tasks for future learning. \
@@ -269,11 +296,14 @@ Call after task completion with outcome.
 - mendicant_forget: Remove a specific fact from memory.
 - mendicant_memory_status: Get memory statistics and health.
 
-Recommended workflow: classify_task → route_tools → execute → verify → record_pattern
+Recommended workflow: session_init → classify_task → route_tools → execute → verify → record_pattern
 
-Memory tools persist across sessions. Use mendicant_remember to store user preferences, \
-project context, and learned facts. Use mendicant_recall at the start of conversations \
-to load relevant context.\
+Session init loads memory context and pending verifications automatically. \
+For long conversations, use optimize_context for semantic ranking — it preserves \
+semantically relevant context regardless of age, unlike age-based compression. \
+Verification runs automatically via hooks for critical tasks; use mendicant_verify \
+explicitly for non-critical tasks or manual quality checks. Memory tools persist \
+across sessions — use mendicant_remember for user preferences and learned facts.\
 """
 
 
@@ -496,6 +526,77 @@ async def list_tools() -> list[Tool]:
                     },
                 },
             },
+        ),
+        # ----- Phase 3 tools -----
+        Tool(
+            name="mendicant_optimize_context",
+            description=(
+                "Optimize a message list using semantic value ranking. "
+                "Ranks messages by importance (semantic relevance to "
+                "current query, recency, role weight) and compresses "
+                "lowest-priority messages first. Use when context is "
+                "getting large and you want to preserve the most "
+                "relevant information regardless of age."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "role": {
+                                    "type": "string",
+                                    "enum": ["system", "user", "assistant", "tool"],
+                                    "description": "Message role.",
+                                },
+                                "content": {
+                                    "type": "string",
+                                    "description": "Message content text.",
+                                },
+                            },
+                            "required": ["role", "content"],
+                        },
+                        "description": "List of messages to optimize.",
+                    },
+                    "budget_tokens": {
+                        "type": "integer",
+                        "description": "Target token budget for the optimized output. Default: 30000.",
+                    },
+                    "current_query": {
+                        "type": "string",
+                        "description": (
+                            "The current user query for semantic relevance scoring. "
+                            "Messages similar to this query rank higher."
+                        ),
+                    },
+                },
+                "required": ["messages"],
+            },
+            _meta=_ALWAYS_LOAD,
+        ),
+        Tool(
+            name="mendicant_session_init",
+            description=(
+                "Initialize or resume a Mendicant Bias session. Loads "
+                "memory context, returns cached task classification and "
+                "any pending verification results. Call at the start of "
+                "a conversation or when resuming work."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {
+                        "type": "string",
+                        "description": (
+                            "Optional session ID to resume. If omitted, "
+                            "a new session is created."
+                        ),
+                    },
+                },
+            },
+            _meta=_ALWAYS_LOAD,
         ),
         # ----- Memory tools -----
         Tool(
@@ -1079,6 +1180,104 @@ def _memory_status() -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Phase 3 tool implementations
+# ---------------------------------------------------------------------------
+
+
+def _optimize_context(
+    messages: list[dict[str, str]],
+    budget_tokens: int = 30000,
+    current_query: str | None = None,
+) -> dict[str, Any]:
+    """
+    Optimize messages using semantic value ranking via the ContextOptimizer.
+
+    Unlike FR4's age-based compression, this ranks by importance and
+    compresses the lowest-value messages first.
+    """
+    optimizer = _get_context_optimizer()
+    return optimizer.optimize(
+        messages=messages,
+        budget_tokens=budget_tokens,
+        current_query=current_query,
+    )
+
+
+def _session_init(session_id: str | None = None) -> dict[str, Any]:
+    """
+    Initialize or resume a Mendicant Bias session.
+
+    Loads memory context, cached task classification, and any pending
+    verification results into a single response for session bootstrap.
+    """
+    import uuid
+
+    # Generate session ID if not provided
+    if not session_id:
+        session_id = f"session_{uuid.uuid4().hex[:12]}"
+
+    # Load memory context
+    memory_context: dict[str, Any] = {}
+    try:
+        store = _get_memory_store()
+        data = store.load()
+        facts = store.get_facts()
+        # Return recent high-confidence facts as session context
+        sorted_facts = sorted(facts, key=lambda f: -f.confidence)[:10]
+        memory_context = {
+            "facts": [
+                {
+                    "id": f.id,
+                    "content": f.content,
+                    "category": f.category,
+                    "confidence": f.confidence,
+                }
+                for f in sorted_facts
+            ],
+            "top_of_mind": data.user.top_of_mind.summary or None,
+            "work_context": data.user.work_context.summary or None,
+            "total_facts": len(facts),
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[MCP] Memory load failed during session_init: %s", exc)
+        memory_context = {"facts": [], "total_facts": 0, "error": str(exc)}
+
+    # Check for cached task classification (from previous session state)
+    task_classification: dict[str, Any] | None = None
+
+    # Check for pending verifications
+    pending_verifications: list[dict[str, Any]] = []
+
+    # System status snapshot
+    status_snapshot: dict[str, Any] = {}
+    try:
+        cfg = _get_config()
+        status_snapshot = {
+            "version": "5.0.0",
+            "verification_enabled": cfg.verification.enabled,
+            "context_budget": cfg.context_budget.default_budget,
+            "adaptive_learning_patterns": 0,
+        }
+        try:
+            store = _get_pattern_store()
+            stats = store.get_stats()
+            status_snapshot["adaptive_learning_patterns"] = stats.get("total", 0)
+        except Exception:  # noqa: BLE001
+            pass
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {
+        "session_id": session_id,
+        "session_active": True,
+        "memory_context": memory_context,
+        "task_classification": task_classification,
+        "pending_verifications": pending_verifications,
+        "status": status_snapshot,
+    }
+
+
+# ---------------------------------------------------------------------------
 # MCP call_tool dispatcher
 # ---------------------------------------------------------------------------
 
@@ -1172,6 +1371,19 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         elif name == "mendicant_memory_status":
             result = _memory_status()
+
+        elif name == "mendicant_optimize_context":
+            messages = arguments.get("messages", [])
+            if not messages:
+                result = {"error": "messages is required and must be non-empty"}
+            else:
+                budget_tokens = int(arguments.get("budget_tokens", 30000))
+                current_query = arguments.get("current_query")
+                result = _optimize_context(messages, budget_tokens, current_query)
+
+        elif name == "mendicant_session_init":
+            session_id = arguments.get("session_id")
+            result = _session_init(session_id)
 
         else:
             result = {"error": f"Unknown tool: {name}"}

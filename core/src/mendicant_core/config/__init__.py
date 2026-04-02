@@ -227,6 +227,55 @@ class SmartTaskRouterConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Phase 3 — Hooks & Session
+# ---------------------------------------------------------------------------
+
+
+class HooksConfig(BaseModel):
+    """Configuration for Claude Code HTTP hook integration (Phase 3)."""
+
+    enabled: bool = Field(
+        default=True,
+        description="Master switch for the CC hooks system.",
+    )
+    gateway_url: str = Field(
+        default="http://localhost:8001",
+        description="Base URL of the Mendicant Bias gateway for hook endpoints.",
+    )
+    auto_verify_task_types: list[str] = Field(
+        default_factory=lambda: ["CODE_GENERATION", "CRITICAL_CODE"],
+        description=(
+            "Task types that trigger automatic verification on Write/Edit hooks."
+        ),
+    )
+    auto_verify_tool_matchers: list[str] = Field(
+        default_factory=lambda: ["Write", "Edit"],
+        description=(
+            "Tool names that trigger automatic verification in PostToolUse hooks."
+        ),
+    )
+
+    model_config = {"extra": "ignore"}
+
+
+class SessionConfig(BaseModel):
+    """Configuration for per-session state tracking."""
+
+    max_age_hours: int = Field(
+        default=4,
+        ge=1,
+        description="Maximum session age before cleanup, in hours.",
+    )
+    cleanup_interval_minutes: int = Field(
+        default=10,
+        ge=1,
+        description="How often to run session cleanup, in minutes.",
+    )
+
+    model_config = {"extra": "ignore"}
+
+
+# ---------------------------------------------------------------------------
 # Container
 # ---------------------------------------------------------------------------
 
@@ -263,6 +312,8 @@ class MendicantConfig(BaseModel):
     smart_task_router: SmartTaskRouterConfig = Field(
         default_factory=SmartTaskRouterConfig
     )
+    hooks: HooksConfig = Field(default_factory=HooksConfig)
+    session: SessionConfig = Field(default_factory=SessionConfig)
 
     model_config = {"extra": "ignore"}
 

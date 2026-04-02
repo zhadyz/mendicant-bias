@@ -562,6 +562,142 @@ def init(target_dir: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# mendicant install-hooks
+# ---------------------------------------------------------------------------
+
+@cli.command("install-hooks")
+@click.option(
+    "--gateway-url",
+    default="http://localhost:8001",
+    help="Mendicant Bias gateway URL (default: http://localhost:8001)",
+)
+@click.option(
+    "--settings-path",
+    default=None,
+    type=click.Path(),
+    help="Path to Claude Code settings.json (default: auto-detect)",
+)
+def install_hooks(gateway_url: str, settings_path: Optional[str]) -> None:
+    """Install Mendicant Bias hooks into Claude Code settings."""
+    _print_banner()
+
+    try:
+        from mendicant_bias.hooks import (
+            install_hooks as _install,
+            generate_hooks_config,
+            _default_cc_settings_path,
+        )
+    except ImportError:
+        console.print(
+            "[red]Error:[/red] Could not import hooks module. "
+            "Ensure mendicant-bias is installed."
+        )
+        raise SystemExit(1)
+
+    resolved_path = Path(settings_path) if settings_path else _default_cc_settings_path()
+    console.print(f"[bold cyan]Installing Mendicant Bias hooks[/bold cyan]")
+    console.print(f"  Gateway URL   : {gateway_url}")
+    console.print(f"  Settings file : {resolved_path}")
+    console.print()
+
+    # Show the hooks being installed
+    config = generate_hooks_config(gateway_url)
+    hooks = config["hooks"]
+    table = Table(
+        title="Hook Endpoints",
+        show_header=True,
+        header_style="bold cyan",
+        border_style="dim",
+    )
+    table.add_column("Event", style="bold")
+    table.add_column("Matcher", style="white")
+    table.add_column("URL", style="dim")
+    table.add_column("Timeout", justify="right")
+
+    for event_name, event_hooks in hooks.items():
+        for hook_group in event_hooks:
+            matcher = hook_group.get("matcher", "*")
+            for hook in hook_group.get("hooks", []):
+                table.add_row(
+                    event_name,
+                    matcher or "(all)",
+                    hook.get("url", ""),
+                    f"{hook.get('timeout', '?')}s",
+                )
+
+    console.print(table)
+    console.print()
+
+    success = _install(
+        settings_path=Path(settings_path) if settings_path else None,
+        gateway_url=gateway_url,
+    )
+
+    if success:
+        console.print("[green]Hooks installed successfully.[/green]")
+        console.print()
+        console.print("[dim]Next steps:[/dim]")
+        console.print("  1. Start the gateway: [bold]mendicant serve[/bold]")
+        console.print("  2. Restart Claude Code to pick up the new hooks")
+        console.print(
+            "  3. Mendicant will now run inside CC's execution pipeline"
+        )
+    else:
+        console.print("[red]Failed to install hooks.[/red]")
+        raise SystemExit(1)
+
+
+# ---------------------------------------------------------------------------
+# mendicant remove-hooks
+# ---------------------------------------------------------------------------
+
+@cli.command("remove-hooks")
+@click.option(
+    "--settings-path",
+    default=None,
+    type=click.Path(),
+    help="Path to Claude Code settings.json (default: auto-detect)",
+)
+@click.option(
+    "--gateway-url",
+    default="http://localhost:8001",
+    help="Gateway URL to match when removing hooks (default: http://localhost:8001)",
+)
+def remove_hooks(settings_path: Optional[str], gateway_url: str) -> None:
+    """Remove Mendicant Bias hooks from Claude Code settings."""
+    _print_banner()
+
+    try:
+        from mendicant_bias.hooks import (
+            remove_hooks as _remove,
+            _default_cc_settings_path,
+        )
+    except ImportError:
+        console.print(
+            "[red]Error:[/red] Could not import hooks module. "
+            "Ensure mendicant-bias is installed."
+        )
+        raise SystemExit(1)
+
+    resolved_path = Path(settings_path) if settings_path else _default_cc_settings_path()
+    console.print(f"[bold cyan]Removing Mendicant Bias hooks[/bold cyan]")
+    console.print(f"  Settings file : {resolved_path}")
+    console.print()
+
+    success = _remove(
+        settings_path=Path(settings_path) if settings_path else None,
+        gateway_url=gateway_url,
+    )
+
+    if success:
+        console.print("[green]Hooks removed successfully.[/green]")
+        console.print("[dim]Restart Claude Code for changes to take effect.[/dim]")
+    else:
+        console.print("[red]Failed to remove hooks.[/red]")
+        raise SystemExit(1)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

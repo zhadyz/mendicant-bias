@@ -17,6 +17,12 @@ POST /api/mendicant/classify         -> Classify a task via SmartTaskRouter
 POST /api/mendicant/route            -> Route tools for a query via SemanticToolRouter
 POST /api/mendicant/verify           -> Run verification check
 POST /api/mendicant/recommend        -> Get strategy recommendations
+
+Phase 3 — Claude Code HTTP Hooks:
+POST /hooks/session-start            -> CC SessionStart hook
+POST /hooks/pre-tool-use             -> CC PreToolUse hook
+POST /hooks/post-tool-use            -> CC PostToolUse hook
+GET  /hooks/status                   -> Hook system status
 """
 
 from __future__ import annotations
@@ -39,6 +45,7 @@ from mendicant_core.middleware import (
     SmartTaskRouterMiddleware,
 )
 from mendicant_core.middleware.registry import RegistryQuery
+from mendicant_gateway.hooks import hooks_router
 
 logger = logging.getLogger(__name__)
 
@@ -167,11 +174,15 @@ app = FastAPI(
     description=(
         "REST API for the Mendicant Bias V5 intelligence middleware system. "
         "Provides task classification, tool routing, verification, and "
-        "strategy recommendation via HTTP."
+        "strategy recommendation via HTTP.  Phase 3 adds CC hook endpoints "
+        "for inline execution within the Claude Code pipeline."
     ),
     version="5.0.0",
     lifespan=lifespan,
 )
+
+# Phase 3 — Claude Code HTTP hook endpoints
+app.include_router(hooks_router)
 
 
 # ---------------------------------------------------------------------------
