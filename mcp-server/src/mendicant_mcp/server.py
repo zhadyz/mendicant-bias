@@ -8,6 +8,7 @@ orchestration and pattern storage as MCP tools over stdio transport.
 
 Tools
 -----
+mendicant_delegate           — Autonomous delegation: hand entire task to agent runtime
 mendicant_session_init       — Initialize/resume session with memory + state
 mendicant_classify_task      — FR5 Smart Task Router: classify a task and get runtime flags
 mendicant_route_tools        — FR1 Semantic Tool Router: find relevant tools for a query
@@ -267,8 +268,19 @@ app = Server("mendicant-bias")
 # Server instructions — read by Claude Code to understand how to use Mendicant tools
 INSTRUCTIONS = """\
 Mendicant Bias is an intelligence middleware system with five engines (FR1-FR5), \
-conversational memory, session management, and semantic context optimization:
+conversational memory, session management, semantic context optimization, and \
+autonomous task delegation:
 
+Key tool: mendicant_delegate — for complex tasks, delegate the ENTIRE task to \
+Mendicant's autonomous agent runtime. The agent thinks independently, selects \
+specialist agents, and returns a complete result. Use this instead of trying to \
+do everything yourself when the task warrants deep analysis.
+
+- mendicant_delegate: Delegate an entire task to Mendicant's autonomous agent \
+runtime. The agent spawns specialist sub-agents (hollowed_eyes, the_didact, \
+loveless, etc.) and returns a complete result. Supports modes: flash (fast), \
+standard (thinking), pro (planning+thinking), ultra (planning+subagents+thinking). \
+Falls back to middleware-based response if LangGraph is unavailable.
 - mendicant_session_init: Initialize or resume a session. Loads memory, returns \
 cached classification and pending verifications. Call at conversation start.
 - mendicant_classify_task (FR5): Classify tasks early to set strategy flags. \
@@ -296,7 +308,11 @@ Call after task completion with outcome.
 - mendicant_forget: Remove a specific fact from memory.
 - mendicant_memory_status: Get memory statistics and health.
 
-Recommended workflow: session_init → classify_task → route_tools → execute → verify → record_pattern
+Recommended workflow: session_init → classify_task → delegate or route_tools → execute → verify → record_pattern
+
+For complex tasks (analysis, research, architecture, strategy): use mendicant_delegate \
+with mode "pro" or "ultra" to let the autonomous runtime handle it end-to-end.
+For quick actions (classify, verify, remember, status): use individual tools directly.
 
 Session init loads memory context and pending verifications automatically. \
 For long conversations, use optimize_context for semantic ranking — it preserves \
@@ -319,6 +335,48 @@ async def list_tools() -> list[Tool]:
     _ALWAYS_LOAD = {"anthropic/alwaysLoad": True}
 
     return [
+        Tool(
+            name="mendicant_delegate",
+            description=(
+                "Delegate an entire task to Mendicant Bias's autonomous agent runtime. "
+                "Unlike other Mendicant tools which provide data for YOU to act on, this "
+                "tool hands the task to Mendicant's own agent which thinks independently, "
+                "spawns specialist sub-agents, and returns a complete result. Use for "
+                "complex analysis, deep research, architecture review, or any task that "
+                "benefits from parallel specialist agents and a separate 200K context window. "
+                "The agent has access to all 13 named specialists (hollowed_eyes, the_didact, "
+                "loveless, etc.) and the full middleware stack."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "task": {
+                        "type": "string",
+                        "description": "The complete task description. Be detailed — this is the agent's entire brief.",
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": "Optional additional context (file contents, requirements, etc.)",
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["flash", "standard", "pro", "ultra"],
+                        "description": "Execution mode. flash=fast/simple, standard=thinking, pro=planning+thinking, ultra=planning+subagents+thinking. Default: pro",
+                    },
+                    "agents": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of specialist agents to involve (e.g. ['the_didact', 'the_architect'])",
+                    },
+                    "timeout_seconds": {
+                        "type": "integer",
+                        "description": "Max execution time in seconds (default: 300 = 5 minutes)",
+                    },
+                },
+                "required": ["task"],
+            },
+            _meta=_ALWAYS_LOAD,
+        ),
         Tool(
             name="mendicant_classify_task",
             description=(
@@ -1278,6 +1336,250 @@ def _session_init(session_id: str | None = None) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Autonomous delegation
+# ---------------------------------------------------------------------------
+
+
+def _auto_select_agents(task_type: str, task_text: str) -> list[str]:
+    """Select agents based on task type and keyword signals in the task."""
+    mapping: dict[str, list[str]] = {
+        "SIMPLE": [],
+        "RESEARCH": ["the_didact"],
+        "CODE_GENERATION": ["hollowed_eyes"],
+        "CRITICAL_CODE": ["hollowed_eyes", "loveless"],
+        "MULTI_MODAL": ["cinna"],
+    }
+    agents = list(mapping.get(task_type, ["the_didact"]))
+
+    # Add architect for any task mentioning architecture/design/system
+    task_lower = task_text.lower()
+    if any(kw in task_lower for kw in ["architect", "design", "system", "scalab"]):
+        if "the_architect" not in agents:
+            agents.append("the_architect")
+
+    # Add analyst for data/metrics/analytics tasks
+    if any(kw in task_lower for kw in ["analy", "metric", "data", "revenue", "growth"]):
+        if "the_analyst" not in agents:
+            agents.append("the_analyst")
+
+    return agents
+
+
+def _try_langgraph_delegation(
+    task: str,
+    context: str | None,
+    mode: str,
+    agent_profiles: list[dict[str, Any]],
+    timeout_seconds: int,
+) -> dict[str, Any] | None:
+    """Try to delegate to LangGraph runtime. Returns None if unavailable."""
+    import urllib.request
+    import urllib.error
+
+    # Check if gateway is running
+    try:
+        req = urllib.request.urlopen("http://localhost:8001/health", timeout=2)
+        json.loads(req.read())
+    except Exception:
+        return None  # Gateway not running, use fallback
+
+    # Check if LangGraph is running
+    try:
+        urllib.request.urlopen("http://localhost:2024/ok", timeout=2)
+    except Exception:
+        return None  # LangGraph not running, use fallback
+
+    # Create thread
+    try:
+        create_req = urllib.request.Request(
+            "http://localhost:2024/threads",
+            data=json.dumps({}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        resp = urllib.request.urlopen(create_req, timeout=5)
+        thread = json.loads(resp.read())
+        thread_id = thread["thread_id"]
+    except Exception:
+        return None
+
+    # Build the prompt
+    mode_context = {
+        "flash": {"thinking_enabled": False, "is_plan_mode": False, "subagent_enabled": False},
+        "standard": {"thinking_enabled": True, "is_plan_mode": False, "subagent_enabled": False},
+        "pro": {"thinking_enabled": True, "is_plan_mode": True, "subagent_enabled": False},
+        "ultra": {"thinking_enabled": True, "is_plan_mode": True, "subagent_enabled": True},
+    }
+
+    full_prompt = task
+    if context:
+        full_prompt += f"\n\n## Additional Context\n{context}"
+    if agent_profiles:
+        full_prompt += "\n\n## Available Specialist Agents\n"
+        for p in agent_profiles:
+            full_prompt += f"- {p.get('name')}: {p.get('description', '')}\n"
+
+    # Stream the run
+    try:
+        run_data = {
+            "assistant_id": "lead_agent",
+            "input": {"messages": [{"role": "human", "content": full_prompt}]},
+            "config": {
+                "configurable": {
+                    **mode_context.get(mode, mode_context["pro"]),
+                    "thread_id": thread_id,
+                },
+            },
+            "stream_mode": ["values"],
+        }
+        run_req = urllib.request.Request(
+            f"http://localhost:2024/threads/{thread_id}/runs/stream",
+            data=json.dumps(run_data).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        resp = urllib.request.urlopen(run_req, timeout=timeout_seconds)
+
+        # Parse SSE response — collect all messages
+        raw = resp.read().decode("utf-8")
+        messages: list[dict[str, Any]] = []
+        for line in raw.split("\n"):
+            if line.startswith("data: "):
+                try:
+                    data = json.loads(line[6:])
+                    if "messages" in data:
+                        messages = data["messages"]
+                except Exception:
+                    pass
+
+        if messages:
+            last_ai: str | None = None
+            for msg in reversed(messages):
+                if msg.get("type") == "ai" or msg.get("role") == "assistant":
+                    content = msg.get("content", "")
+                    if isinstance(content, list):
+                        content = " ".join(
+                            p.get("text", "") for p in content if isinstance(p, dict)
+                        )
+                    if content:
+                        last_ai = content
+                        break
+            if last_ai:
+                return {"source": "langgraph", "thread_id": thread_id, "response": last_ai}
+
+        return None
+    except Exception:
+        return None
+
+
+def _build_middleware_response(
+    task: str,
+    context: str | None,
+    classification: dict[str, Any],
+    recommendations: dict[str, Any],
+    agent_profiles: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build response using middleware stack when LangGraph is unavailable."""
+    response: dict[str, Any] = {
+        "source": "middleware_fallback",
+        "classification": classification,
+        "strategy": {
+            "task_type": classification.get("task_type"),
+            "verification_needed": classification.get("verification_enabled", False),
+            "thinking_needed": classification.get("thinking_enabled", False),
+        },
+        "agent_recommendations": [
+            {
+                "name": a.get("name"),
+                "description": a.get("description"),
+                "domains": a.get("domains", []),
+            }
+            for a in agent_profiles
+        ],
+    }
+
+    if recommendations.get("count", 0) > 0:
+        response["past_patterns"] = [
+            {
+                "task": p.get("task_text", ""),
+                "tools_used": p.get("tools_used", []),
+                "outcome": p.get("outcome", ""),
+            }
+            for p in recommendations.get("patterns", [])[:3]
+        ]
+
+    # Memory recall relevant to the task
+    try:
+        memory = _recall(task[:200])
+        if memory.get("facts"):
+            response["relevant_memory"] = memory["facts"][:5]
+    except Exception:
+        pass
+
+    return response
+
+
+def _delegate(
+    task: str,
+    context: str | None = None,
+    mode: str = "pro",
+    agents: list[str] | None = None,
+    timeout_seconds: int = 300,
+) -> dict[str, Any]:
+    """Delegate a task to Mendicant's autonomous runtime."""
+    start = time.monotonic()
+
+    # 1. Classify the task
+    classification = _classify_task(task)
+    task_type = classification.get("task_type", "RESEARCH")
+
+    # 2. Get recommendations from past patterns
+    recommendations = _recommend(task, task_type)
+
+    # 3. Get relevant agent profiles
+    agent_profiles: list[dict[str, Any]] = []
+    if agents:
+        for agent_name in agents:
+            profile = _get_agent(name=agent_name)
+            if "error" not in profile:
+                agent_profiles.append(profile)
+    else:
+        # Auto-select agents based on task type
+        auto_agents = _auto_select_agents(task_type, task)
+        for agent_name in auto_agents:
+            profile = _get_agent(name=agent_name)
+            if "error" not in profile:
+                agent_profiles.append(profile)
+
+    # 4. Try LangGraph delegation first
+    result = _try_langgraph_delegation(task, context, mode, agent_profiles, timeout_seconds)
+
+    if result is None:
+        # 5. Fallback: build comprehensive response from middleware
+        result = _build_middleware_response(task, context, classification, recommendations, agent_profiles)
+
+    # 6. Record the pattern
+    duration = time.monotonic() - start
+    _record_pattern(
+        task_text=task[:500],
+        task_type=task_type,
+        tools_used=["mendicant_delegate"] + [a.get("name", "") for a in agent_profiles],
+        outcome="success",
+    )
+
+    return {
+        "status": "completed",
+        "task_type": task_type,
+        "mode": mode,
+        "agents_involved": [a.get("name", "") for a in agent_profiles],
+        "classification": classification,
+        "recommendations": recommendations,
+        "result": result,
+        "duration_seconds": round(duration, 2),
+    }
+
+
+# ---------------------------------------------------------------------------
 # MCP call_tool dispatcher
 # ---------------------------------------------------------------------------
 
@@ -1287,7 +1589,24 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     try:
         result: dict[str, Any]
 
-        if name == "mendicant_classify_task":
+        if name == "mendicant_delegate":
+            task = arguments.get("task", "")
+            if not task:
+                result = {"error": "task is required"}
+            else:
+                context = arguments.get("context")
+                mode = arguments.get("mode", "pro")
+                agents = arguments.get("agents")
+                timeout_seconds = int(arguments.get("timeout_seconds", 300))
+                result = _delegate(
+                    task=task,
+                    context=context,
+                    mode=mode,
+                    agents=agents,
+                    timeout_seconds=timeout_seconds,
+                )
+
+        elif name == "mendicant_classify_task":
             task_text = arguments.get("task_text", "")
             if not task_text:
                 result = {"error": "task_text is required"}
