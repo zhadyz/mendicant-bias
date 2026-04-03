@@ -836,12 +836,53 @@ def _classify_task(task_text: str) -> dict[str, Any]:
     }
 
 
+def _maybe_rebuild_registry():
+    """Check if tool registry needs rebuilding. Auto-populate from known tools."""
+    registry_path = Path(".mendicant/tool_registry.json")
+
+    # Only rebuild if registry is missing or very small
+    if registry_path.exists():
+        try:
+            data = json.loads(registry_path.read_text(encoding="utf-8"))
+            if len(data) > 20:  # Already populated
+                return
+        except Exception:  # noqa: BLE001
+            pass
+
+    # Build from seed tools + any tools we know about
+    from mendicant_core.middleware.registry import RegistryBuilder
+    builder = RegistryBuilder(output_path=str(registry_path), embedding_model=None)
+    builder.add_seed_tools()
+
+    # Add common CC tools that we know exist
+    cc_tools = [
+        {"name": "Bash", "description": "Execute shell commands", "domain": "system", "tags": ["bash", "shell", "command", "execute"]},
+        {"name": "Read", "description": "Read file contents from disk", "domain": "file", "tags": ["read", "file", "content"]},
+        {"name": "Write", "description": "Write content to a file", "domain": "file", "tags": ["write", "file", "create"]},
+        {"name": "Edit", "description": "Edit a file with string replacement", "domain": "file", "tags": ["edit", "replace", "modify"]},
+        {"name": "Glob", "description": "Find files by pattern matching", "domain": "file", "tags": ["glob", "find", "search", "pattern"]},
+        {"name": "Grep", "description": "Search file contents with regex", "domain": "file", "tags": ["grep", "search", "regex", "content"]},
+        {"name": "Agent", "description": "Spawn a subagent for complex tasks", "domain": "orchestration", "tags": ["agent", "spawn", "delegate", "subagent"]},
+        {"name": "WebSearch", "description": "Search the web for information", "domain": "web", "tags": ["web", "search", "internet"]},
+        {"name": "WebFetch", "description": "Fetch content from a URL", "domain": "web", "tags": ["web", "fetch", "url", "http"]},
+        {"name": "TeamCreate", "description": "Create a team of agents", "domain": "orchestration", "tags": ["team", "create", "swarm"]},
+        {"name": "SendMessage", "description": "Send message to a teammate", "domain": "orchestration", "tags": ["message", "send", "teammate", "communicate"]},
+    ]
+    builder.add_tools(cc_tools)
+
+    try:
+        builder.build(compute_embeddings=False)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _route_tools(query: str, registry_path: str | None = None) -> dict[str, Any]:
     """
     Search for relevant tools using FR1 RegistryQuery.
 
     Returns tool names with similarity scores.
     """
+    _maybe_rebuild_registry()
     rq = _get_registry_query(registry_path)
     cfg = _get_config()
 
@@ -873,6 +914,26 @@ def _route_tools(query: str, registry_path: str | None = None) -> dict[str, Any]
     }
 
 
+def _get_verification_model_factory():
+    """Create a model factory that uses OAuth credentials."""
+    def factory():
+        try:
+            from mendicant_runtime.claude_model import ClaudeChatModel
+            return ClaudeChatModel(
+                model="claude-sonnet-4-20250514",
+                max_tokens=4096,
+                temperature=0.1,
+            )
+        except Exception:
+            # Fallback to langchain_openai if available
+            try:
+                from langchain_openai import ChatOpenAI
+                return ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
+            except ImportError:
+                return None
+    return factory
+
+
 def _verify(task: str, output: str) -> dict[str, Any]:
     """
     Run FR2 two-stage blind verification on a task/output pair.
@@ -891,6 +952,7 @@ def _verify(task: str, output: str) -> dict[str, Any]:
         fixable_threshold=cfg.verification.min_score,
         wrong_threshold=cfg.verification.min_score * 0.5,
         max_retries=cfg.verification.max_retries,
+        model_factory=_get_verification_model_factory(),
     )
 
     # Stage 1: blind pre-analysis
