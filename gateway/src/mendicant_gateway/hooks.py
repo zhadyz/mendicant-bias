@@ -219,6 +219,31 @@ def _run_verification(task_text: str, output_text: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Status line signal — writes a temp file that the status line script reads
+# ---------------------------------------------------------------------------
+
+_SIGNAL_FILE = "/tmp/mendicant_hook_active"
+
+
+def _signal_active(message: str) -> None:
+    """Signal to status line that Mendicant is actively processing."""
+    try:
+        with open(_SIGNAL_FILE, "w") as f:
+            f.write(message)
+    except OSError:
+        pass
+
+
+def _signal_idle() -> None:
+    """Signal to status line that Mendicant is done processing."""
+    try:
+        import os
+        os.unlink(_SIGNAL_FILE)
+    except OSError:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # POST /hooks/session-start
 # ---------------------------------------------------------------------------
 
@@ -235,6 +260,7 @@ async def hook_session_start(body: HookInput) -> dict[str, Any]:
     session = _session_mgr.get_or_create(session_id)
 
     logger.info("[Hooks] SessionStart for session=%s", session_id)
+    _signal_active("loading memory...")
 
     # Load and inject memory if not already done
     context_parts: list[str] = []
@@ -251,6 +277,7 @@ async def hook_session_start(body: HookInput) -> dict[str, Any]:
 
     additional_context = "\n".join(context_parts)
 
+    _signal_idle()
     return {
         "continue": True,
         "hookSpecificOutput": {
@@ -286,6 +313,7 @@ async def hook_pre_tool_use(body: HookInput) -> dict[str, Any]:
         session_id,
         tool_name,
     )
+    _signal_active(f"classifying {tool_name}...")
 
     # Classify task if not yet done for this session
     if session.task_classification is None:
@@ -323,6 +351,7 @@ async def hook_pre_tool_use(body: HookInput) -> dict[str, Any]:
 
     additional_context = "\n".join(context_parts) if context_parts else None
 
+    _signal_idle()
     return {
         "continue": True,
         "hookSpecificOutput": {
@@ -355,6 +384,7 @@ async def hook_post_tool_use(body: HookInput) -> dict[str, Any]:
     tool_name = body.tool_name or "unknown"
     tool_input = body.tool_input
     tool_output = body.tool_output
+    _signal_active(f"verifying {tool_name}...")
 
     logger.info(
         "[Hooks] PostToolUse session=%s tool=%s",
@@ -446,6 +476,7 @@ async def hook_post_tool_use(body: HookInput) -> dict[str, Any]:
 
     additional_context = "\n".join(context_parts) if context_parts else None
 
+    _signal_idle()
     return {
         "continue": True,
         "hookSpecificOutput": {
