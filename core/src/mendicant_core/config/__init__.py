@@ -358,23 +358,21 @@ class MendicantConfig(BaseModel):
 
         return SemanticToolRouterMiddleware(
             registry_path=self.semantic_tool_router.registry_path,
-            embedding_model=self.semantic_tool_router.embedding_model,
-            top_k=self.semantic_tool_router.top_k,
-            similarity_threshold=self.semantic_tool_router.similarity_threshold,
-            inject_as_system_hint=self.semantic_tool_router.inject_as_system_hint,
+            model_name=self.semantic_tool_router.embedding_model,
+            confidence_threshold=self.semantic_tool_router.similarity_threshold,
+            max_tools_per_domain=self.semantic_tool_router.top_k,
         )
 
     def build_verification_middleware(self):  # type: ignore[return]
-        """Instantiate QualityGateMiddleware from this config."""
-        from mendicant_core.middleware.verification import QualityGateMiddleware
+        """Instantiate VerificationMiddleware from this config."""
+        from mendicant_core.middleware.verification import VerificationMiddleware
 
-        return QualityGateMiddleware(
-            enabled=self.verification.enabled,
-            model=self.verification.model,
+        return VerificationMiddleware(
+            model_name=self.verification.model,
             temperature=self.verification.temperature,
-            min_score=self.verification.min_score,
+            fixable_threshold=self.verification.min_score,
+            wrong_threshold=self.verification.min_score * 0.5,
             max_retries=self.verification.max_retries,
-            timeout_seconds=self.verification.timeout_seconds,
             model_factory=None,
         )
 
@@ -386,9 +384,8 @@ class MendicantConfig(BaseModel):
 
         return AdaptiveLearningMiddleware(
             store_path=self.adaptive_learning.store_path,
-            max_patterns=self.adaptive_learning.max_patterns,
-            min_success_rate=self.adaptive_learning.min_success_rate,
-            recommendation_window=self.adaptive_learning.recommendation_window,
+            max_records=self.adaptive_learning.max_patterns,
+            model_name=self.adaptive_learning.embedding_model,
         )
 
     def build_context_budget_middleware(self):  # type: ignore[return]
