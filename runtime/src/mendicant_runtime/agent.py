@@ -265,7 +265,7 @@ def make_mendicant_agent(
     agent = create_react_agent(
         model=model,
         tools=tools or [],
-        state_modifier=prompt,
+        prompt=prompt,
         state_schema=state_schema or MendicantThreadState,
     )
 

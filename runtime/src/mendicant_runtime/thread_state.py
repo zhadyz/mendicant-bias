@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, NotRequired, TypedDict
 
-from langgraph.prebuilt import MessagesState
+from langgraph.graph import MessagesState
 
 
 # ---------------------------------------------------------------------------
@@ -158,3 +158,6 @@ class MendicantThreadState(MessagesState):
     task_start_time: NotRequired[float | None]
     agent_name: NotRequired[str | None]
     turn_count: NotRequired[int]
+
+    # Required by create_react_agent v2
+    remaining_steps: NotRequired[int]
