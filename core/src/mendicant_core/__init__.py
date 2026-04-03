@@ -38,6 +38,7 @@ Named after Mendicant Bias, the Forerunner Contender-class AI from Halo.
 __version__ = "5.0.0"
 
 from mendicant_core.config import MendicantConfig
+from mendicant_core.mahoraga import AdaptationRule, MahoragaEngine
 from mendicant_core.memory import (
     MemoryData,
     MemoryInjector,
@@ -57,6 +58,9 @@ from mendicant_core.middleware import (
 __all__ = [
     "__version__",
     "MendicantConfig",
+    # Mahoraga (Adaptation)
+    "AdaptationRule",
+    "MahoragaEngine",
     # Memory
     "MemoryData",
     "MemoryInjector",

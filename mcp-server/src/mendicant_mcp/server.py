@@ -24,6 +24,10 @@ mendicant_remember           — Store a fact in conversational memory
 mendicant_recall             — Retrieve facts from memory by query or category
 mendicant_forget             — Remove a fact from memory by ID
 mendicant_memory_status      — Get memory statistics and health
+mendicant_adapt              — Mahoraga: record a behavioral adaptation rule
+mendicant_get_adaptations    — Mahoraga: get applicable rules for current context
+mendicant_adaptation_feedback — Mahoraga: report success/failure of an adaptation
+mendicant_list_adaptations   — Mahoraga: list all stored adaptation rules + stats
 
 Usage
 -----
@@ -63,6 +67,7 @@ _context_budget_mw: Any | None = None
 _memory_store: Any | None = None
 _context_optimizer: Any | None = None
 _runtime: Any | None = None
+_mahoraga_engine: Any | None = None
 
 
 def _load_yaml_config() -> dict[str, Any]:
@@ -292,6 +297,24 @@ def _get_mendicant_runtime():
     return _runtime
 
 
+def _get_mahoraga_engine():
+    """Lazily initialize and return a MahoragaEngine singleton."""
+    global _mahoraga_engine
+    if _mahoraga_engine is None:
+        from mendicant_core.mahoraga import MahoragaEngine
+
+        # Check config for custom storage path, fallback to default
+        storage_path = ".mendicant/mahoraga.json"
+        try:
+            raw = _load_yaml_config()
+            storage_path = raw.get("mahoraga", {}).get("store_path", storage_path)
+        except Exception:  # noqa: BLE001
+            pass
+
+        _mahoraga_engine = MahoragaEngine(store_path=storage_path)
+    return _mahoraga_engine
+
+
 # ---------------------------------------------------------------------------
 # MCP Server
 # ---------------------------------------------------------------------------
@@ -342,8 +365,17 @@ Call after task completion with outcome.
 - mendicant_recall: Retrieve facts from memory by query or category.
 - mendicant_forget: Remove a specific fact from memory.
 - mendicant_memory_status: Get memory statistics and health.
+- mendicant_adapt (Mahoraga): Record an observed behavior, preference, or correction as an \
+adaptation rule. Mahoraga extracts a rule heuristically and persists it. Use when the user \
+states a preference ("always X"), corrects you ("no, use Y instead"), or establishes a workflow.
+- mendicant_get_adaptations (Mahoraga): Get adaptation rules that apply to the current context. \
+Returns matching rules sorted by confidence and a formatted injection block for the prompt.
+- mendicant_adaptation_feedback (Mahoraga): Record whether an adaptation rule led to a good or \
+bad outcome. Boosts or reduces confidence so the system self-corrects over time.
+- mendicant_list_adaptations (Mahoraga): List all stored adaptation rules with optional filters \
+and statistics.
 
-Recommended workflow: session_init → classify_task → delegate or route_tools → execute → verify → record_pattern
+Recommended workflow: session_init → get_adaptations → classify_task → delegate or route_tools → execute → verify → record_pattern
 
 For complex tasks (analysis, research, architecture, strategy): use mendicant_delegate \
 with mode "pro" or "ultra" to let the autonomous runtime handle it end-to-end.
@@ -775,6 +807,130 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {},
+            },
+        ),
+        # ----- Mahoraga adaptation tools -----
+        Tool(
+            name="mendicant_adapt",
+            description=(
+                "Record a behavioral observation as a Mahoraga adaptation rule. "
+                "Mahoraga extracts a rule heuristically from the observation and "
+                "persists it. Use when the user states a preference ('always use "
+                "pytest'), corrects your approach ('no, use X instead of Y'), or "
+                "establishes a workflow. The system never falls for the same "
+                "mistake twice."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "observation": {
+                        "type": "string",
+                        "description": (
+                            "The user's statement, correction, or preference to learn from. "
+                            "Examples: 'always use pytest not unittest', 'when testing, use "
+                            "Chrome', 'no, route refactoring to hollowed_eyes'."
+                        ),
+                    },
+                    "type": {
+                        "type": "string",
+                        "enum": ["preference", "correction", "workflow", "tool", "style", "agent"],
+                        "description": (
+                            "Type of observation. preference=explicit user rule, "
+                            "correction=user corrected your approach, workflow=process "
+                            "pattern, tool=tool selection, style=code style, agent=agent "
+                            "routing preference."
+                        ),
+                    },
+                    "original": {
+                        "type": "string",
+                        "description": (
+                            "For corrections: what you originally did that was wrong. "
+                            "Helps extract the 'instead of' pattern."
+                        ),
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": "Optional context about when this observation occurred.",
+                    },
+                },
+                "required": ["observation", "type"],
+            },
+            _meta=_ALWAYS_LOAD,
+        ),
+        Tool(
+            name="mendicant_get_adaptations",
+            description=(
+                "Get Mahoraga adaptation rules that apply to the current context. "
+                "Returns matching rules sorted by confidence and a formatted "
+                "injection block to prepend to your reasoning. Call this BEFORE "
+                "starting work to pick up user preferences and learned behaviors."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "context": {
+                        "type": "string",
+                        "description": (
+                            "The current task or request context to match rules against."
+                        ),
+                    },
+                    "category": {
+                        "type": "string",
+                        "enum": ["PREFERENCE", "PATTERN", "CORRECTION", "TOOL", "STYLE", "WORKFLOW", "AGENT"],
+                        "description": "Optional: filter to a specific rule category.",
+                    },
+                },
+                "required": ["context"],
+            },
+            _meta=_ALWAYS_LOAD,
+        ),
+        Tool(
+            name="mendicant_adaptation_feedback",
+            description=(
+                "Record whether a Mahoraga adaptation rule led to a good or bad "
+                "outcome. On success, confidence increases so the rule fires more "
+                "readily. On failure, confidence decreases and the rule may be "
+                "deactivated. This is how Mahoraga self-corrects."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "rule_id": {
+                        "type": "string",
+                        "description": "The ID of the adaptation rule to give feedback on.",
+                    },
+                    "outcome": {
+                        "type": "string",
+                        "enum": ["success", "failure"],
+                        "description": (
+                            "success=the rule was helpful, failure=the rule was wrong "
+                            "or overridden."
+                        ),
+                    },
+                },
+                "required": ["rule_id", "outcome"],
+            },
+        ),
+        Tool(
+            name="mendicant_list_adaptations",
+            description=(
+                "List all stored Mahoraga adaptation rules. Shows the full set "
+                "of learned behaviors, preferences, and corrections with confidence "
+                "scores and application statistics."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "enum": ["PREFERENCE", "PATTERN", "CORRECTION", "TOOL", "STYLE", "WORKFLOW", "AGENT"],
+                        "description": "Optional: filter to a specific rule category.",
+                    },
+                    "active_only": {
+                        "type": "boolean",
+                        "description": "Only show active rules. Default: true.",
+                    },
+                },
             },
         ),
     ]
@@ -1644,6 +1800,146 @@ def _delegate(
 
 
 # ---------------------------------------------------------------------------
+# Mahoraga adaptation tool implementations
+# ---------------------------------------------------------------------------
+
+
+def _adapt(
+    observation: str,
+    obs_type: str,
+    original: str | None = None,
+    context: str | None = None,
+) -> dict[str, Any]:
+    """Record a behavioral observation as a Mahoraga adaptation rule."""
+    engine = _get_mahoraga_engine()
+    ctx = context or ""
+
+    if obs_type == "correction":
+        rule = engine.observe_correction(
+            original=original or "",
+            correction=observation,
+            context=ctx,
+        )
+    elif obs_type == "workflow":
+        # Split observation into steps (by comma, arrow, or "then")
+        import re
+
+        steps = re.split(r"\s*(?:->|→|,\s*then\s*|,\s*)\s*", observation)
+        steps = [s.strip() for s in steps if s.strip()]
+        rule = engine.observe_workflow(steps=steps, context=ctx)
+    elif obs_type == "agent":
+        # Try to extract agent name from observation
+        extracted = engine.extract_rule_from_text(observation)
+        if extracted:
+            engine.add_rule(extracted)
+            rule = extracted
+        else:
+            rule = engine.observe_preference(observation, context=ctx)
+    else:
+        # preference, tool, style — all go through observe_preference
+        rule = engine.observe_preference(observation, context=ctx)
+
+    return {
+        "rule_id": rule.id,
+        "trigger": rule.trigger,
+        "action": rule.action,
+        "confidence": round(rule.confidence, 3),
+        "category": rule.category,
+        "source": rule.source,
+    }
+
+
+def _get_adaptations(
+    context: str,
+    category: str | None = None,
+) -> dict[str, Any]:
+    """Get adaptation rules applicable to the current context."""
+    engine = _get_mahoraga_engine()
+    rules = engine.get_applicable_rules(context, category=category)
+
+    # Mark rules as applied
+    for rule in rules:
+        engine.apply_and_track(rule.id)
+
+    injection = engine.format_rules_for_injection(rules)
+
+    return {
+        "rules": [
+            {
+                "rule_id": r.id,
+                "category": r.category,
+                "trigger": r.trigger,
+                "action": r.action,
+                "confidence": round(r.confidence, 3),
+                "source": r.source,
+                "apply_count": r.apply_count,
+            }
+            for r in rules
+        ],
+        "injection": injection,
+        "total_matched": len(rules),
+    }
+
+
+def _adaptation_feedback(
+    rule_id: str,
+    outcome: str,
+) -> dict[str, Any]:
+    """Record success or failure for an adaptation rule."""
+    engine = _get_mahoraga_engine()
+
+    if outcome == "success":
+        engine.record_success(rule_id)
+    else:
+        engine.record_failure(rule_id)
+
+    # Find the updated rule to return new confidence
+    all_rules = engine.get_all_rules(active_only=False)
+    for rule in all_rules:
+        if rule.id == rule_id:
+            return {
+                "rule_id": rule_id,
+                "new_confidence": round(rule.confidence, 3),
+                "active": rule.active,
+                "success_count": rule.success_count,
+                "failure_count": rule.failure_count,
+            }
+
+    return {"error": f"Rule '{rule_id}' not found"}
+
+
+def _list_adaptations(
+    category: str | None = None,
+    active_only: bool = True,
+) -> dict[str, Any]:
+    """List all adaptation rules with stats."""
+    engine = _get_mahoraga_engine()
+    rules = engine.get_all_rules(category=category, active_only=active_only)
+    stats = engine.get_stats()
+
+    return {
+        "rules": [
+            {
+                "rule_id": r.id,
+                "category": r.category,
+                "trigger": r.trigger,
+                "action": r.action,
+                "confidence": round(r.confidence, 3),
+                "source": r.source,
+                "active": r.active,
+                "apply_count": r.apply_count,
+                "success_count": r.success_count,
+                "failure_count": r.failure_count,
+                "created_at": r.created_at,
+                "last_applied": r.last_applied,
+            }
+            for r in rules
+        ],
+        "stats": stats,
+    }
+
+
+# ---------------------------------------------------------------------------
 # MCP call_tool dispatcher
 # ---------------------------------------------------------------------------
 
@@ -1767,6 +2063,41 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         elif name == "mendicant_session_init":
             session_id = arguments.get("session_id")
             result = _session_init(session_id)
+
+        # ----- Mahoraga adaptation tools -----
+
+        elif name == "mendicant_adapt":
+            observation = arguments.get("observation", "")
+            if not observation:
+                result = {"error": "observation is required"}
+            else:
+                obs_type = arguments.get("type", "preference")
+                original = arguments.get("original")
+                context = arguments.get("context")
+                result = _adapt(observation, obs_type, original, context)
+
+        elif name == "mendicant_get_adaptations":
+            context = arguments.get("context", "")
+            if not context:
+                result = {"error": "context is required"}
+            else:
+                category = arguments.get("category")
+                result = _get_adaptations(context, category)
+
+        elif name == "mendicant_adaptation_feedback":
+            rule_id = arguments.get("rule_id", "")
+            outcome = arguments.get("outcome", "")
+            if not rule_id or not outcome:
+                result = {"error": "rule_id and outcome are required"}
+            else:
+                result = _adaptation_feedback(rule_id, outcome)
+
+        elif name == "mendicant_list_adaptations":
+            category = arguments.get("category")
+            active_only = arguments.get("active_only", True)
+            if isinstance(active_only, str):
+                active_only = active_only.lower() != "false"
+            result = _list_adaptations(category, active_only)
 
         else:
             result = {"error": f"Unknown tool: {name}"}

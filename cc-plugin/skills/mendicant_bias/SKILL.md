@@ -12,6 +12,12 @@ allowed-tools: []
 
 When this skill is invoked, follow this EXACT sequence:
 
+### Step 0: Load adaptations
+Call `mendicant_get_adaptations` with the user's request context.
+Apply any returned rules to your approach BEFORE classifying or executing.
+These are user preferences and learned behaviors -- follow them.
+If rules are returned, incorporate the injection block into your reasoning.
+
 ### Step 1: Classify the task
 Call `mendicant_classify_task` with the user's request. This determines the task type and strategy.
 
@@ -58,6 +64,11 @@ Agent({name: "cinna", team_name: "mendicant", subagent_type: "cinna", descriptio
 ### Step 4: Verify and record
 - Call `mendicant_verify` on any code output
 - Call `mendicant_record_pattern` with the task outcome
+
+### After completion:
+If the user corrected your approach, call `mendicant_adapt` with type "correction" to learn from the mistake.
+If the user approved or the task succeeded, call `mendicant_adaptation_feedback` with outcome "success" for any adaptation rules that were applied.
+If an applied adaptation rule was wrong or unhelpful, call `mendicant_adaptation_feedback` with outcome "failure".
 
 ## Agent Roster
 
@@ -106,3 +117,7 @@ Spawn `the_didact` (research), `the_architect` (architecture), `the_analyst` (me
 | `mendicant_optimize_context` | Semantic context ranking |
 | `mendicant_session_init` | Load memory + middleware state |
 | `mendicant_status` | System health check |
+| `mendicant_adapt` | Record a behavioral adaptation (Mahoraga) |
+| `mendicant_get_adaptations` | Load applicable adaptation rules for context |
+| `mendicant_adaptation_feedback` | Report success/failure of an adaptation |
+| `mendicant_list_adaptations` | List all stored adaptations with stats |
