@@ -61,6 +61,8 @@ from mendicant_core.middleware import (
     VerificationMiddleware,
 )
 
+from mendicant_core.sandbox.tools import create_sandbox_tools
+
 from mendicant_runtime.config import load_config
 from mendicant_runtime.models import create_model
 from mendicant_runtime.sandbox import LocalSandbox, LocalSandboxProvider
@@ -68,6 +70,49 @@ from mendicant_runtime.subagents import SubagentConfig, SubagentExecutor, Subage
 from mendicant_runtime.thread_state import MendicantThreadState
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Sandbox tool proxy — swappable sandbox reference for per-thread binding
+# ---------------------------------------------------------------------------
+
+
+class _SandboxProxy:
+    """
+    A thin proxy around a ``Sandbox`` that can be swapped per-invocation.
+
+    The ``MendicantRuntime`` keeps one set of LangChain sandbox tools across
+    all threads, but each thread has its own ``LocalSandbox``.  This proxy
+    lets us create the tools once and bind to the correct sandbox before
+    each invoke.
+    """
+
+    def __init__(self) -> None:
+        self._sandbox: Any = None
+
+    def bind(self, sandbox: Any) -> None:
+        """Bind to a sandbox instance for the current invocation."""
+        self._sandbox = sandbox
+
+    def execute_command(self, command: str) -> str:
+        if self._sandbox is None:
+            return "ERROR: No sandbox bound"
+        return self._sandbox.execute_command(command)
+
+    def read_file(self, path: str) -> str:
+        if self._sandbox is None:
+            raise FileNotFoundError("No sandbox bound")
+        return self._sandbox.read_file(path)
+
+    def write_file(self, path: str, content: str, append: bool = False) -> None:
+        if self._sandbox is None:
+            raise PermissionError("No sandbox bound")
+        return self._sandbox.write_file(path, content, append=append)
+
+    def list_dir(self, path: str, max_depth: int = 2) -> list[str]:
+        if self._sandbox is None:
+            raise NotADirectoryError("No sandbox bound")
+        return self._sandbox.list_dir(path, max_depth=max_depth)
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +216,145 @@ def _categorize_middlewares(
 
 
 # ---------------------------------------------------------------------------
+# Middleware → LangGraph hook adapters
+# ---------------------------------------------------------------------------
+
+
+class _NullRuntime:
+    """
+    Lightweight stand-in for ``langgraph.runtime.Runtime`` when middleware
+    runs inside a LangGraph ``pre_model_hook`` / ``post_model_hook`` (where
+    no real ``Runtime`` object is provided).
+
+    All five Mendicant middleware methods access ``runtime.context`` to obtain
+    a dict with optional keys like ``thread_id``, ``verification_enabled``,
+    ``thread_budgets``, etc.  This class provides a ``context`` dict that
+    can be populated from the graph state.
+    """
+
+    def __init__(self, context: dict[str, Any] | None = None) -> None:
+        self.context: dict[str, Any] = context or {}
+
+
+def _run_middleware_list(
+    middlewares: list[Any],
+    state: dict[str, Any],
+    hook_name: str,
+) -> dict[str, Any]:
+    """
+    Execute a list of middleware instances against *state*, returning a merged
+    state-update dict.
+
+    Each middleware is probed for *hook_name* (e.g. ``"before_agent"``,
+    ``"before_model"``, ``"after_agent"``), then falls back to ``"process"``.
+    A lightweight ``_NullRuntime`` is passed as the second argument to
+    satisfy the ``(state, runtime)`` signature that middleware methods expect.
+    """
+    # Build a runtime context from state fields that middleware might need
+    runtime = _NullRuntime(context={
+        "thread_id": state.get("thread_id"),
+        "verification_enabled": state.get("verification_enabled", True),
+    })
+
+    delta: dict[str, Any] = {}
+    for mw in middlewares:
+        fn = getattr(mw, hook_name, None) or getattr(mw, "process", None)
+        if fn is None:
+            continue
+        try:
+            result = fn(state, runtime)
+            if result is not None:
+                delta.update(result)
+                # Also merge into the state snapshot so downstream middleware
+                # sees earlier middleware outputs (e.g. task_type from
+                # SmartTaskRouter is visible to SemanticToolRouter).
+                state = {**state, **result}
+        except TypeError:
+            # Some middleware may only accept (state) — try without runtime
+            try:
+                result = fn(state)
+                if result is not None:
+                    delta.update(result)
+                    state = {**state, **result}
+            except Exception as exc:
+                logger.warning(
+                    "[MiddlewareHook] %s.%s failed: %s",
+                    type(mw).__name__,
+                    hook_name,
+                    exc,
+                )
+        except Exception as exc:
+            logger.warning(
+                "[MiddlewareHook] %s.%s failed: %s",
+                type(mw).__name__,
+                hook_name,
+                exc,
+            )
+    return delta
+
+
+def _make_pre_model_hook(
+    middlewares: list[Any],
+):
+    """
+    Return a callable suitable for ``create_react_agent(pre_model_hook=...)``.
+
+    The hook receives graph state and must return a dict containing at least
+    ``"messages"`` (to propagate the conversation to the LLM).  Middleware
+    state updates (``task_type``, ``selected_tools``, ``context_budget_usage``,
+    etc.) are merged in.
+    """
+
+    def pre_model_hook(state: dict[str, Any]) -> dict[str, Any]:
+        # Run before_agent middleware (SmartTaskRouter, SemanticToolRouter)
+        before_agent_delta = _run_middleware_list(
+            [m for m in middlewares if isinstance(m, (SmartTaskRouterMiddleware, SemanticToolRouterMiddleware))],
+            state,
+            "before_agent",
+        )
+
+        # Merge into state for before_model middleware
+        merged_state = {**state, **before_agent_delta}
+
+        # Run before_model middleware (ContextBudget)
+        before_model_delta = _run_middleware_list(
+            [m for m in middlewares if isinstance(m, ContextBudgetMiddleware)],
+            merged_state,
+            "before_model",
+        )
+
+        # Build the return dict — must include messages for the LLM
+        result: dict[str, Any] = {}
+        result.update(before_agent_delta)
+        result.update(before_model_delta)
+
+        # Ensure messages are propagated (ContextBudget may have compressed them)
+        if "messages" not in result:
+            result["messages"] = state.get("messages", [])
+
+        return result
+
+    return pre_model_hook
+
+
+def _make_post_model_hook(
+    middlewares: list[Any],
+):
+    """
+    Return a callable suitable for ``create_react_agent(post_model_hook=...)``.
+
+    The hook receives graph state after the LLM call and returns a
+    state-update dict with verification results, learning metadata, etc.
+    """
+
+    def post_model_hook(state: dict[str, Any]) -> dict[str, Any]:
+        delta = _run_middleware_list(middlewares, state, "after_agent")
+        return delta
+
+    return post_model_hook
+
+
+# ---------------------------------------------------------------------------
 # Default system prompt
 # ---------------------------------------------------------------------------
 
@@ -249,6 +433,7 @@ def make_mendicant_agent(
 
     # Build middleware stack
     middlewares = _build_middleware_chain(cfg)
+    phases = _categorize_middlewares(middlewares)
 
     # Create model
     model = create_model(
@@ -261,19 +446,44 @@ def make_mendicant_agent(
     # Use provided system prompt or default
     prompt = system_prompt or _DEFAULT_SYSTEM_PROMPT
 
-    # Create agent with full state schema
+    # ---------------------------------------------------------------
+    # Build pre_model_hook / post_model_hook from middleware chain
+    # ---------------------------------------------------------------
+    # pre_model_hook runs before each LLM call.  We merge:
+    #   - before_agent  middleware (SmartTaskRouter, SemanticToolRouter)
+    #   - before_model  middleware (ContextBudget)
+    # post_model_hook runs after each LLM call.  We merge:
+    #   - after_agent   middleware (Verification, AdaptiveLearning)
+    #
+    # The hook receives graph state and must return a state-update dict.
+    # At minimum, pre_model_hook must include "messages" or
+    # "llm_input_messages" so LangGraph knows what to feed the model.
+    # ---------------------------------------------------------------
+
+    pre_mw = phases.get("before_agent", []) + phases.get("before_model", [])
+    post_mw = phases.get("after_agent", [])
+
+    pre_hook = _make_pre_model_hook(pre_mw) if pre_mw else None
+    post_hook = _make_post_model_hook(post_mw) if post_mw else None
+
+    # Create agent with full state schema and middleware hooks
     agent = create_react_agent(
         model=model,
         tools=tools or [],
         prompt=prompt,
         state_schema=state_schema or MendicantThreadState,
+        pre_model_hook=pre_hook,
+        post_model_hook=post_hook,
     )
 
     logger.info(
-        "[AgentFactory] Created agent -- model=%s, tools=%d, middleware=%d, state=%s",
+        "[AgentFactory] Created agent -- model=%s, tools=%d, middleware=%d, "
+        "pre_hook=%s, post_hook=%s, state=%s",
         model_name,
         len(tools or []),
         len(middlewares),
+        [type(m).__name__ for m in pre_mw] if pre_mw else "(none)",
+        [type(m).__name__ for m in post_mw] if post_mw else "(none)",
         (state_schema or MendicantThreadState).__name__,
     )
 
@@ -329,6 +539,13 @@ class MendicantRuntime:
         # Tool registry
         self._tools: list[Any] = []
         self._base_tools: list[Any] = []  # Unfiltered tools (before agent profile filtering)
+
+        # Sandbox tool proxy — shared across threads, rebound per-invoke
+        self._sandbox_proxy = _SandboxProxy()
+        sandbox_tools = create_sandbox_tools(self._sandbox_proxy)
+        self._sandbox_tools = sandbox_tools
+        self._tools.extend(sandbox_tools)
+        self._base_tools.extend(sandbox_tools)
 
         # Thread state
         self._thread_persistence: bool = bool(
@@ -662,6 +879,7 @@ class MendicantRuntime:
 
         # --- Sandbox lifecycle ---
         sandbox = self._sandbox_provider.acquire(thread_id)
+        self._sandbox_proxy.bind(sandbox)
 
         # --- Memory injection ---
         memory_data = self._memory_store.load()
@@ -723,6 +941,7 @@ class MendicantRuntime:
 
         # Sandbox
         sandbox = self._sandbox_provider.acquire(thread_id)
+        self._sandbox_proxy.bind(sandbox)
 
         # Memory
         memory_data = self._memory_store.load()
@@ -783,6 +1002,7 @@ class MendicantRuntime:
 
         # Lifecycle setup
         sandbox = self._sandbox_provider.acquire(thread_id)
+        self._sandbox_proxy.bind(sandbox)
         memory_data = self._memory_store.load()
         memory_context = self._memory_injector.format_for_injection(memory_data)
 
@@ -838,6 +1058,7 @@ class MendicantRuntime:
 
         # Lifecycle setup
         sandbox = self._sandbox_provider.acquire(thread_id)
+        self._sandbox_proxy.bind(sandbox)
         memory_data = self._memory_store.load()
         memory_context = self._memory_injector.format_for_injection(memory_data)
 
