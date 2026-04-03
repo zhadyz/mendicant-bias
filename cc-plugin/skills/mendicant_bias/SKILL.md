@@ -1,90 +1,108 @@
 ---
 name: mendicant_bias
-description: Mendicant Bias V5 -- intelligence middleware. ALWAYS use mendicant MCP tools when this skill is invoked.
+description: Mendicant Bias — spawn intelligent agent teams with 13 specialists. Classifies tasks, creates CC-native teammate swarms, delegates autonomously.
 user-invocable: true
-when_to_use: "Use for task classification, blind code verification, semantic tool routing, adaptive learning, context optimization, memory, named agents, or autonomous task delegation"
-allowed-tools: [bash]
+when_to_use: "Use for complex tasks that benefit from parallel specialist agents, deep analysis, architecture review, code + QA workflows, or any multi-domain work"
+allowed-tools: []
 ---
 
-# Mendicant Bias V5 -- Intelligence Middleware + Autonomous Delegation
+# Mendicant Bias — Contender-class Intelligence System
 
-## CRITICAL INSTRUCTION
+## EXECUTION PROTOCOL
 
-When this skill is invoked:
-1. If the task is complex (analysis, research, review, architecture, strategy):
-   Call `mendicant_delegate` with the full task. Let Mendicant autonomous agent handle it.
-2. If the task is a quick action (classify, verify, remember, check status):
-   Use the individual MCP tools directly.
-3. Always call `mendicant_classify_task` first to determine which path.
+When this skill is invoked, follow this EXACT sequence:
 
-**Decision flow:**
-1. Call `mendicant_classify_task` with the user request
-2. If task_type is RESEARCH, CODE_GENERATION, CRITICAL_CODE, or MULTI_MODAL:
-   - Call `mendicant_delegate` with mode "pro" (or "ultra" for complex multi-agent work)
-   - The delegate tool handles agent selection, middleware orchestration, and returns a complete result
-3. If task_type is SIMPLE:
-   - Use individual MCP tools (route_tools, verify, remember, etc.)
-4. After any work: call `mendicant_record_pattern` to record what worked
+### Step 1: Classify the task
+Call `mendicant_classify_task` with the user's request. This determines the task type and strategy.
 
-**For complex tasks -- use delegation:**
-- `mendicant_delegate` with mode "pro" for most analysis/research/review tasks
-- `mendicant_delegate` with mode "ultra" for architecture design, multi-domain analysis
-- `mendicant_delegate` with specific agents for targeted work (e.g. `agents: ["hollowed_eyes", "loveless"]` for code review)
+### Step 2: Choose execution path
 
-**For quick actions -- use individual tools:**
-- `mendicant_classify_task` to determine task type
-- `mendicant_verify` after code writes
-- `mendicant_remember` / `mendicant_recall` for memory
-- `mendicant_status` for health checks
-- `mendicant_route_tools` for tool discovery
+**If task_type is SIMPLE:**
+Handle it directly. No team needed. Use Mendicant MCP tools if helpful (route_tools, verify, remember).
 
-**After completing work:**
-- Call `mendicant_verify` on any code/file output
-- Call `mendicant_record_pattern` to record what worked
+**If task_type is RESEARCH, CODE_GENERATION, CRITICAL_CODE, or MULTI_MODAL:**
+Create a Mendicant team and spawn specialist teammates:
 
-## System Check
+1. Call `TeamCreate` with `team_name: "mendicant"`
+2. Based on the task type, spawn the right agents as teammates:
 
-!```bash
-mendicant status 2>/dev/null || echo "Mendicant CLI not installed"
+**RESEARCH tasks:**
+```
+Agent({name: "the_didact", team_name: "mendicant", subagent_type: "the_didact", description: "Research specialist", prompt: "[detailed research brief]"})
+```
+Add `the_architect` if architecture is involved. Add `the_analyst` if data/metrics are involved.
+
+**CODE_GENERATION tasks:**
+```
+Agent({name: "hollowed_eyes", team_name: "mendicant", subagent_type: "hollowed_eyes", description: "Code implementation", prompt: "[detailed implementation brief]"})
+```
+Add `the_didact` for research phase. Add `loveless` for QA AFTER implementation is done.
+
+**CRITICAL_CODE tasks:**
+```
+Agent({name: "hollowed_eyes", team_name: "mendicant", subagent_type: "hollowed_eyes", description: "Implementation", prompt: "[brief]"})
+Agent({name: "loveless", team_name: "mendicant", subagent_type: "loveless", description: "Security review", prompt: "[brief]"})
+```
+ALWAYS include loveless for critical code. Consider `the_architect` for design review.
+
+**MULTI_MODAL tasks:**
+```
+Agent({name: "cinna", team_name: "mendicant", subagent_type: "cinna", description: "Design specialist", prompt: "[brief]"})
 ```
 
-## Available MCP Tools
+### Step 3: Coordinate
+- Use `SendMessage` to communicate between teammates
+- Monitor teammate progress
+- Synthesize results from all agents
 
-| Tool | When To Call |
-|---|---|
-| `mendicant_delegate` | PRIMARY -- complex tasks, analysis, research, architecture, strategy |
-| `mendicant_classify_task` | FIRST -- always classify before acting |
-| `mendicant_route_tools` | When choosing which tools to use |
-| `mendicant_verify` | After any code write/edit |
-| `mendicant_optimize_context` | When context is large (>20k tokens) |
-| `mendicant_recommend` | Before starting -- check what worked before |
-| `mendicant_record_pattern` | After completing -- record for learning |
-| `mendicant_remember` | Store important facts |
-| `mendicant_recall` | Retrieve stored facts |
-| `mendicant_session_init` | Start of session -- load memory |
-| `mendicant_list_agents` | Discover available specialists |
-| `mendicant_get_agent` | Get specialist profile for spawning |
-| `mendicant_status` | Check system health |
+### Step 4: Verify and record
+- Call `mendicant_verify` on any code output
+- Call `mendicant_record_pattern` with the task outcome
 
-## Delegation Modes
+## Agent Roster
 
-| Mode | Description | Use When |
+| Agent | Spawn When | Specialty |
 |---|---|---|
-| `flash` | Fast, no thinking | Simple lookups, quick answers |
-| `standard` | Thinking enabled | Medium complexity tasks |
-| `pro` | Planning + thinking | **Default** -- analysis, research, review |
-| `ultra` | Planning + sub-agents + thinking | Architecture design, multi-domain work |
+| **hollowed_eyes** | Code tasks | Implementation, refactoring, debugging |
+| **the_didact** | Research tasks | Deep analysis, codebase exploration |
+| **loveless** | Security/QA tasks | Testing, security audit, verification |
+| **zhadyz** | DevOps tasks | Deployment, releases, infrastructure |
+| **cinna** | Design tasks | UI/UX, visual design, frontend |
+| **the_architect** | Architecture tasks | System design, scalability, trade-offs |
+| **the_oracle** | Validation tasks | Risk assessment, go/no-go decisions |
+| **the_scribe** | Documentation tasks | Technical writing, API docs |
+| **the_curator** | Cleanup tasks | Refactoring, tech debt, dependency management |
+| **the_cartographer** | Deploy tasks | Cloud, Docker, DNS, hosting |
+| **the_librarian** | Requirements tasks | Stakeholder comms, requirement extraction |
+| **the_sentinel** | CI/CD tasks | Pipeline setup, build automation |
+| **the_analyst** | Analytics tasks | Data analysis, metrics, business intelligence |
 
-## Named Agents -- Available via delegation or `mendicant_get_agent`
+## Parallel Patterns
 
-| Agent | Use When |
+**Research + Implementation:**
+Spawn `the_didact` and `hollowed_eyes` in parallel. Didact researches while hollowed_eyes starts implementation with what's known.
+
+**Implementation + QA:**
+Spawn `hollowed_eyes` first. When done, spawn `loveless` to verify the work. NEVER spawn both simultaneously — QA needs something to verify.
+
+**Architecture + Implementation + Docs:**
+Spawn `the_architect` first for design. Then `hollowed_eyes` for implementation. Then `the_scribe` for documentation. Sequential when dependencies exist.
+
+**Full review:**
+Spawn `the_didact` (research), `the_architect` (architecture), `the_analyst` (metrics) in parallel. Synthesize findings.
+
+## MCP Tools (always available, no team needed)
+
+| Tool | Purpose |
 |---|---|
-| **hollowed_eyes** | Code implementation, refactoring |
-| **the_didact** | Deep research, codebase exploration |
-| **loveless** | QA, security audit, testing |
-| **zhadyz** | DevOps, deployment, releases |
-| **cinna** | UI/UX design, visual polish |
-| **the_architect** | Architecture analysis, system design |
-| **the_oracle** | Validation, go/no-go decisions |
-| **the_scribe** | Documentation, technical writing |
-| **the_analyst** | Data analysis, metrics, business intelligence |
+| `mendicant_classify_task` | Classify task type and set strategy flags |
+| `mendicant_verify` | Two-stage blind quality verification |
+| `mendicant_route_tools` | Find relevant tools by semantic similarity |
+| `mendicant_recommend` | Find similar historical patterns |
+| `mendicant_record_pattern` | Record task outcome for learning |
+| `mendicant_remember` | Store a fact in persistent memory |
+| `mendicant_recall` | Retrieve stored facts |
+| `mendicant_delegate` | Full autonomous delegation (single agent) |
+| `mendicant_optimize_context` | Semantic context ranking |
+| `mendicant_session_init` | Load memory + middleware state |
+| `mendicant_status` | System health check |
