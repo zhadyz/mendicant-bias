@@ -62,6 +62,7 @@ _adaptive_mw: Any | None = None
 _context_budget_mw: Any | None = None
 _memory_store: Any | None = None
 _context_optimizer: Any | None = None
+_runtime: Any | None = None
 
 
 def _load_yaml_config() -> dict[str, Any]:
@@ -259,6 +260,38 @@ def _get_memory_store():
     return _memory_store
 
 
+def _get_mendicant_runtime():
+    """Get or create the MendicantRuntime singleton."""
+    global _runtime
+    if _runtime is not None:
+        return _runtime
+
+    try:
+        from mendicant_runtime import MendicantRuntime
+    except ImportError:
+        raise RuntimeError("mendicant-runtime package not installed")
+
+    try:
+        from mendicant_core.config.settings import get_mendicant_config
+
+        # Try loading from unified config
+        try:
+            config = get_mendicant_config()
+            _runtime = MendicantRuntime(config=config)
+        except Exception:
+            # Fall back to defaults
+            from mendicant_core import MendicantConfig
+
+            _runtime = MendicantRuntime(config=MendicantConfig())
+    except ImportError:
+        # get_mendicant_config not available — use defaults
+        from mendicant_core import MendicantConfig
+
+        _runtime = MendicantRuntime(config=MendicantConfig())
+
+    return _runtime
+
+
 # ---------------------------------------------------------------------------
 # MCP Server
 # ---------------------------------------------------------------------------
@@ -272,15 +305,17 @@ conversational memory, session management, semantic context optimization, and \
 autonomous task delegation:
 
 Key tool: mendicant_delegate — for complex tasks, delegate the ENTIRE task to \
-Mendicant's autonomous agent runtime. The agent thinks independently, selects \
-specialist agents, and returns a complete result. Use this instead of trying to \
-do everything yourself when the task warrants deep analysis.
+Mendicant's own autonomous agent runtime. The agent thinks independently, selects \
+specialist agents, applies the full middleware chain, and returns a complete result. \
+Use this instead of trying to do everything yourself when the task warrants deep analysis.
 
-- mendicant_delegate: Delegate an entire task to Mendicant's autonomous agent \
-runtime. The agent spawns specialist sub-agents (hollowed_eyes, the_didact, \
-loveless, etc.) and returns a complete result. Supports modes: flash (fast), \
-standard (thinking), pro (planning+thinking), ultra (planning+subagents+thinking). \
-Falls back to middleware-based response if LangGraph is unavailable.
+- mendicant_delegate: Delegate an entire task to Mendicant's own LangGraph agent \
+runtime. The runtime applies the full middleware chain (SmartTaskRouter, \
+SemanticToolRouter, ContextBudget, Verification, AdaptiveLearning) and spawns \
+specialist sub-agents (hollowed_eyes, the_didact, loveless, etc.). Supports modes: \
+flash (fast), standard (thinking), pro (planning+thinking), \
+ultra (planning+subagents+thinking). Falls back to middleware-only analysis \
+if the runtime is not installed.
 - mendicant_session_init: Initialize or resume a session. Loads memory, returns \
 cached classification and pending verifications. Call at conversation start.
 - mendicant_classify_task (FR5): Classify tasks early to set strategy flags. \
@@ -1365,110 +1400,77 @@ def _auto_select_agents(task_type: str, task_text: str) -> list[str]:
     return agents
 
 
-def _try_langgraph_delegation(
+def _try_mendicant_runtime(
     task: str,
     context: str | None,
     mode: str,
     agent_profiles: list[dict[str, Any]],
     timeout_seconds: int,
 ) -> dict[str, Any] | None:
-    """Try to delegate to LangGraph runtime. Returns None if unavailable."""
-    import urllib.request
-    import urllib.error
-
-    # Check if gateway is running
+    """Run the task through Mendicant's own LangGraph agent runtime."""
     try:
-        req = urllib.request.urlopen("http://localhost:8001/health", timeout=2)
-        json.loads(req.read())
-    except Exception:
-        return None  # Gateway not running, use fallback
-
-    # Check if LangGraph is running
-    try:
-        urllib.request.urlopen("http://localhost:2024/ok", timeout=2)
-    except Exception:
-        return None  # LangGraph not running, use fallback
-
-    # Create thread
-    try:
-        create_req = urllib.request.Request(
-            "http://localhost:2024/threads",
-            data=json.dumps({}).encode(),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        resp = urllib.request.urlopen(create_req, timeout=5)
-        thread = json.loads(resp.read())
-        thread_id = thread["thread_id"]
-    except Exception:
+        from mendicant_runtime import MendicantRuntime
+    except ImportError:
+        logger.debug("[Delegate] mendicant-runtime not installed; using middleware fallback")
         return None
 
-    # Build the prompt
-    mode_context = {
-        "flash": {"thinking_enabled": False, "is_plan_mode": False, "subagent_enabled": False},
-        "standard": {"thinking_enabled": True, "is_plan_mode": False, "subagent_enabled": False},
-        "pro": {"thinking_enabled": True, "is_plan_mode": True, "subagent_enabled": False},
-        "ultra": {"thinking_enabled": True, "is_plan_mode": True, "subagent_enabled": True},
-    }
-
-    full_prompt = task
-    if context:
-        full_prompt += f"\n\n## Additional Context\n{context}"
-    if agent_profiles:
-        full_prompt += "\n\n## Available Specialist Agents\n"
-        for p in agent_profiles:
-            full_prompt += f"- {p.get('name')}: {p.get('description', '')}\n"
-
-    # Stream the run
     try:
-        run_data = {
-            "assistant_id": "lead_agent",
-            "input": {"messages": [{"role": "human", "content": full_prompt}]},
-            "config": {
-                "configurable": {
-                    **mode_context.get(mode, mode_context["pro"]),
-                    "thread_id": thread_id,
-                },
-            },
-            "stream_mode": ["values"],
+        # Build prompt
+        full_prompt = task
+        if context:
+            full_prompt += f"\n\n## Additional Context\n{context}"
+        if agent_profiles:
+            full_prompt += "\n\n## Available Specialist Agents\n"
+            for p in agent_profiles:
+                full_prompt += f"- **{p.get('name')}**: {p.get('description', '')}\n"
+                if p.get('domains'):
+                    full_prompt += f"  Domains: {', '.join(p['domains'])}\n"
+
+        # Add mode instructions
+        mode_instructions = {
+            "flash": "Respond quickly and concisely. No extended thinking needed.",
+            "standard": "Think through the problem step by step.",
+            "pro": "Plan your approach first, then execute methodically. Be thorough.",
+            "ultra": "This is a complex task. Plan carefully, consider multiple angles, "
+                     "and provide a comprehensive analysis. Use all available specialist "
+                     "knowledge from the agent profiles listed above.",
         }
-        run_req = urllib.request.Request(
-            f"http://localhost:2024/threads/{thread_id}/runs/stream",
-            data=json.dumps(run_data).encode(),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        resp = urllib.request.urlopen(run_req, timeout=timeout_seconds)
+        full_prompt += f"\n\n## Execution Mode: {mode}\n{mode_instructions.get(mode, mode_instructions['pro'])}"
 
-        # Parse SSE response — collect all messages
-        raw = resp.read().decode("utf-8")
-        messages: list[dict[str, Any]] = []
-        for line in raw.split("\n"):
-            if line.startswith("data: "):
-                try:
-                    data = json.loads(line[6:])
-                    if "messages" in data:
-                        messages = data["messages"]
-                except Exception:
-                    pass
+        # Create or load runtime
+        runtime = _get_mendicant_runtime()
 
-        if messages:
-            last_ai: str | None = None
-            for msg in reversed(messages):
-                if msg.get("type") == "ai" or msg.get("role") == "assistant":
-                    content = msg.get("content", "")
-                    if isinstance(content, list):
-                        content = " ".join(
-                            p.get("text", "") for p in content if isinstance(p, dict)
-                        )
-                    if content:
-                        last_ai = content
-                        break
-            if last_ai:
-                return {"source": "langgraph", "thread_id": thread_id, "response": last_ai}
+        # Generate a thread ID for this delegation
+        import uuid
+        thread_id = f"delegate_{uuid.uuid4().hex[:12]}"
+
+        # Invoke the agent
+        result = runtime.invoke(full_prompt, thread_id=thread_id)
+
+        # Extract the last AI message
+        messages = result.get("messages", [])
+        response_text = ""
+        for msg in reversed(messages):
+            msg_type = getattr(msg, "type", None) or (msg.get("type") if isinstance(msg, dict) else None)
+            if msg_type == "ai":
+                content = getattr(msg, "content", None) or (msg.get("content") if isinstance(msg, dict) else "")
+                if isinstance(content, list):
+                    content = " ".join(p.get("text", "") for p in content if isinstance(p, dict))
+                if content:
+                    response_text = content
+                    break
+
+        if response_text:
+            return {
+                "source": "mendicant_runtime",
+                "thread_id": thread_id,
+                "response": response_text,
+                "middleware_chain": [type(m).__name__ for m in runtime.middlewares],
+            }
 
         return None
-    except Exception:
+    except Exception as exc:
+        logger.warning("[Delegate] Runtime execution failed: %s", exc)
         return None
 
 
@@ -1479,7 +1481,7 @@ def _build_middleware_response(
     recommendations: dict[str, Any],
     agent_profiles: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Build response using middleware stack when LangGraph is unavailable."""
+    """Build response using middleware stack when the agent runtime is unavailable."""
     response: dict[str, Any] = {
         "source": "middleware_fallback",
         "classification": classification,
@@ -1551,11 +1553,11 @@ def _delegate(
             if "error" not in profile:
                 agent_profiles.append(profile)
 
-    # 4. Try LangGraph delegation first
-    result = _try_langgraph_delegation(task, context, mode, agent_profiles, timeout_seconds)
+    # 4. Try Mendicant's own agent runtime first
+    result = _try_mendicant_runtime(task, context, mode, agent_profiles, timeout_seconds)
 
     if result is None:
-        # 5. Fallback: build comprehensive response from middleware
+        # 5. Fallback: build response from middleware stack alone (no agent loop)
         result = _build_middleware_response(task, context, classification, recommendations, agent_profiles)
 
     # 6. Record the pattern
