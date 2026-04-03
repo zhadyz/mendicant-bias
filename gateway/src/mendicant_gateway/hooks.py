@@ -222,7 +222,10 @@ def _run_verification(task_text: str, output_text: str) -> dict[str, Any]:
 # Status line signal — writes a temp file that the status line script reads
 # ---------------------------------------------------------------------------
 
-_SIGNAL_FILE = "/tmp/mendicant_hook_active"
+import tempfile as _tempfile
+_TMPDIR = _tempfile.gettempdir()
+_SIGNAL_FILE = os.path.join(_TMPDIR, "mendicant_hook_active")
+_SESSION_FILE = os.path.join(_TMPDIR, "mendicant_session")
 
 
 def _signal_active(message: str) -> None:
@@ -230,6 +233,16 @@ def _signal_active(message: str) -> None:
     try:
         with open(_SIGNAL_FILE, "w") as f:
             f.write(message)
+    except OSError:
+        pass
+    # Mark session as active (written once, persists for session lifetime)
+    try:
+        if not os.path.exists(_SESSION_FILE):
+            with open(_SESSION_FILE, "w") as f:
+                f.write("active")
+        else:
+            # Touch the file to keep it fresh
+            os.utime(_SESSION_FILE, None)
     except OSError:
         pass
 

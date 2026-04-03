@@ -1,74 +1,87 @@
 #!/usr/bin/env python3
 """
-Mendicant Bias — Intelligent status line for Claude Code.
+Mendicant Bias — Three-state intelligent status line for Claude Code.
 
-ONLY shows when Mendicant is actively involved in processing.
-If Claude Code is working on its own without Mendicant, the
-status line is empty — clean terminal, no clutter.
+Two signal files, zero network calls, sub-millisecond execution.
 
-Visible when:
-  - A Mendicant hook is actively firing (classifying, verifying)
-  - A Mendicant MCP tool was called in the current turn
-
-Invisible when:
-  - Normal Claude Code operation (no Mendicant involvement)
-  - Gateway is offline
-  - No hooks have fired recently
+States:
+  INVISIBLE   — Mendicant not used this session. Clean terminal.
+  DIM BLUE    — Mendicant active this session, currently idle.
+                ⬡ MENDICANT
+  BRIGHT BLUE — Mendicant actively processing a hook right now.
+                ⬡ MENDICANT ── classifying Bash...
 """
 
-import json
 import os
 import sys
+import tempfile
 import time
-import urllib.request
 
-# Force UTF-8 output on Windows
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-# Colors (24-bit ANSI)
-BLUE = "\033[38;2;0;170;255m"
-DIM = "\033[38;2;60;80;120m"
-DIMMER = "\033[38;2;45;50;65m"
-RESET = "\033[0m"
-BOLD = "\033[1m"
+# ── Appearance ──────────────────────────────────────────────────────────────
 
-ICON = "\u2b21"  # ⬡
+BRIGHT  = "\033[38;2;0;170;255m"
+MEDIUM  = "\033[38;2;0;120;200m"
+SUBTLE  = "\033[38;2;40;55;80m"
+RESET   = "\033[0m"
+BOLD    = "\033[1m"
+
+ICON = "\u2b21"
 NAME = "MENDICANT"
-SEP = "\u2500\u2500"  # ──
+SEP  = "\u2500\u2500"
 
-SIGNAL_FILE = "/tmp/mendicant_hook_active"
-GATEWAY = "http://localhost:8001"
+# ── Signal files (cross-platform temp dir) ──────────────────────────────────
+
+_TMPDIR = tempfile.gettempdir()
+SESSION_FILE = os.path.join(_TMPDIR, "mendicant_session")
+HOOK_FILE    = os.path.join(_TMPDIR, "mendicant_hook_active")
+
+SESSION_MAX_AGE = 4 * 3600
+HOOK_MAX_AGE    = 10
+
+
+def _file_age(path: str) -> float | None:
+    try:
+        return time.time() - os.path.getmtime(path)
+    except OSError:
+        return None
+
+
+def _read_file(path: str) -> str | None:
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read().strip()
+    except OSError:
+        return None
 
 
 def _render(parts: list[tuple[str, str]]) -> str:
-    return "".join(f"{color}{text}{RESET}" for color, text in parts)
+    return "".join(f"{c}{t}{RESET}" for c, t in parts)
 
 
 def main():
-    # Check if Mendicant is ACTIVELY processing right now
-    # Signal file written by gateway hooks, cleared when done
-    hook_msg = None
-    try:
-        with open(SIGNAL_FILE, "r") as f:
-            stat = os.fstat(f.fileno())
-            age = time.time() - stat.st_mtime
-            if age < 10:  # Signal expires after 10 seconds
-                hook_msg = f.read().strip()
-    except (OSError, IOError):
-        pass
-
-    if hook_msg:
-        # Mendicant is actively thinking — show bright blue with activity
+    # State 3: BRIGHT BLUE — actively processing
+    hook_age = _file_age(HOOK_FILE)
+    if hook_age is not None and hook_age < HOOK_MAX_AGE:
+        hook_msg = _read_file(HOOK_FILE) or "processing..."
         print(_render([
-            (BLUE + BOLD, f"{ICON} {NAME}"),
-            (DIMMER, f" {SEP} "),
-            (BLUE, hook_msg),
+            (BRIGHT + BOLD, f"{ICON} {NAME}"),
+            (SUBTLE,        f" {SEP} "),
+            (BRIGHT,        hook_msg),
         ]))
         return
 
-    # No active hook — output nothing. Clean terminal.
-    # Mendicant is invisible when it's not involved.
+    # State 2: DIM BLUE — session active, currently idle
+    session_age = _file_age(SESSION_FILE)
+    if session_age is not None and session_age < SESSION_MAX_AGE:
+        print(_render([
+            (MEDIUM, f"{ICON} {NAME}"),
+        ]))
+        return
+
+    # State 1: INVISIBLE — not used this session
 
 
 if __name__ == "__main__":
