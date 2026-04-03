@@ -114,15 +114,13 @@ def _parse_model_name(name: str) -> tuple[str, str]:
 
 
 def _create_anthropic(model_id: str, **kwargs: Any) -> Any:
-    """Create an Anthropic ChatAnthropic model."""
-    try:
-        from langchain_anthropic import ChatAnthropic
-    except ImportError as exc:
-        raise ImportError(
-            "langchain-anthropic is required for Anthropic models. "
-            "Install it with: pip install langchain-anthropic"
-        ) from exc
+    """Create an Anthropic model, preferring ClaudeChatModel with OAuth support.
 
+    Tries :class:`~mendicant_runtime.claude_model.ClaudeChatModel` first, which
+    auto-loads OAuth credentials from the user's Claude Code installation.  If
+    that fails (e.g. missing dependency, credential error) it falls back to the
+    standard ``ChatAnthropic`` with an explicit API key.
+    """
     # Map common kwargs to Anthropic-specific names
     params: dict[str, Any] = {"model": model_id}
 
@@ -138,7 +136,28 @@ def _create_anthropic(model_id: str, **kwargs: Any) -> Any:
     # Pass through any remaining kwargs
     params.update(kwargs)
 
-    logger.info("[Models] Creating Anthropic model: %s", model_id)
+    # --- Try ClaudeChatModel (OAuth-aware) first ---
+    try:
+        from mendicant_runtime.claude_model import ClaudeChatModel
+
+        logger.info("[Models] Creating ClaudeChatModel (OAuth-aware): %s", model_id)
+        return ClaudeChatModel(**params)
+    except Exception as exc:
+        logger.debug(
+            "[Models] ClaudeChatModel unavailable (%s), falling back to ChatAnthropic",
+            exc,
+        )
+
+    # --- Fallback: standard ChatAnthropic ---
+    try:
+        from langchain_anthropic import ChatAnthropic
+    except ImportError as exc:
+        raise ImportError(
+            "langchain-anthropic is required for Anthropic models. "
+            "Install it with: pip install langchain-anthropic"
+        ) from exc
+
+    logger.info("[Models] Creating standard ChatAnthropic model: %s", model_id)
     return ChatAnthropic(**params)
 
 

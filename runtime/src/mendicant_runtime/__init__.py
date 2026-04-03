@@ -45,6 +45,8 @@ __version__ = "5.0.0"
 
 from mendicant_runtime.agent import make_mendicant_agent, MendicantRuntime
 from mendicant_runtime.config import load_config
+from mendicant_runtime.claude_model import ClaudeChatModel
+from mendicant_runtime.credentials import ClaudeCredential, load_claude_credential
 from mendicant_runtime.models import create_model
 from mendicant_runtime.sandbox import LocalSandbox, LocalSandboxProvider
 from mendicant_runtime.subagents import SubagentConfig, SubagentExecutor, SubagentTask
@@ -64,6 +66,10 @@ __all__ = [
     # Configuration
     "load_config",
     "create_model",
+    # Claude model & credentials
+    "ClaudeChatModel",
+    "ClaudeCredential",
+    "load_claude_credential",
     # Thread state
     "MendicantThreadState",
     "SandboxState",
