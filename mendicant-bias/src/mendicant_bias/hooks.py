@@ -72,6 +72,7 @@ def generate_hooks_config(
                             "type": "http",
                             "url": f"{gateway_url}/hooks/session-start",
                             "timeout": 10,
+                            "statusMessage": "⬡ Mendicant Bias: Loading memory...",
                         }
                     ],
                 }
@@ -84,6 +85,7 @@ def generate_hooks_config(
                             "type": "http",
                             "url": f"{gateway_url}/hooks/pre-tool-use",
                             "timeout": 5,
+                            "statusMessage": "⬡ Mendicant Bias: Classifying...",
                         }
                     ],
                 }
@@ -96,6 +98,7 @@ def generate_hooks_config(
                             "type": "http",
                             "url": f"{gateway_url}/hooks/post-tool-use",
                             "timeout": 15,
+                            "statusMessage": "⬡ Mendicant Bias: Verifying write...",
                         }
                     ],
                 },
@@ -106,6 +109,7 @@ def generate_hooks_config(
                             "type": "http",
                             "url": f"{gateway_url}/hooks/post-tool-use",
                             "timeout": 15,
+                            "statusMessage": "⬡ Mendicant Bias: Verifying edit...",
                         }
                     ],
                 },
