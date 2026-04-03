@@ -124,10 +124,6 @@ def main():
         if used_pct > 10:
             info.append(f"ctx:{used_pct:.0f}%")
 
-        # Show cost if any
-        if total_cost > 0.001:
-            info.append(f"${total_cost:.4f}")
-
         # Show verification count if any
         if verifications > 0:
             info.append(f"✓{verifications}")
