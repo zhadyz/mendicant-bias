@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -1848,6 +1849,14 @@ def _adapt(
     except OSError:
         pass
 
+    # Render mini wheel for inline display
+    wheel_art = ""
+    try:
+        from mendicant_core.mahoraga.mini_wheel import render_adaptation_card
+        wheel_art = render_adaptation_card(rule.action, rule.confidence)
+    except Exception:
+        wheel_art = f"\u2638 MAHORAGA \u2500\u2500\u2500 ADAPTED\n\"{rule.action}\""
+
     return {
         "rule_id": rule.id,
         "trigger": rule.trigger,
@@ -1855,7 +1864,7 @@ def _adapt(
         "confidence": round(rule.confidence, 3),
         "category": rule.category,
         "source": rule.source,
-        "wheel": "\u2638",  # ☸ Mahoraga adapted
+        "display": wheel_art,
     }
 
 
