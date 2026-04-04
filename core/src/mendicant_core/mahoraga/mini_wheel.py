@@ -113,12 +113,7 @@ def render_adaptation_card(action: str, confidence: float = 0.95, angle: float =
     # Find the widest wheel line
     max_w = max(len(line) for line in wheel_lines) if wheel_lines else 0
 
-    header = f"\u2638 MAHORAGA \u2500\u2500\u2500 ADAPTED"
-    footer_action = f'"{action}"'
-    footer_conf = f"confidence: {confidence:.0%}"
-
-    parts = [header, wheel, footer_action, footer_conf]
-    return '\n'.join(parts)
+    return f'adapting: "{action}" ({confidence:.0%})'
 
 
 if __name__ == "__main__":
