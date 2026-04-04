@@ -37,9 +37,11 @@ SEP  = "\u2500\u2500"
 _TMPDIR = tempfile.gettempdir()
 SESSION_FILE = os.path.join(_TMPDIR, "mendicant_session")
 HOOK_FILE    = os.path.join(_TMPDIR, "mendicant_hook_active")
+ADAPT_FILE   = os.path.join(_TMPDIR, "mendicant_adapted")
 
 SESSION_MAX_AGE = 4 * 3600
 HOOK_MAX_AGE    = 10
+ADAPT_MAX_AGE   = 30  # Show ☸ for 30s after adaptation
 
 
 def _file_age(path: str) -> float | None:
@@ -71,6 +73,19 @@ def main():
             (SUBTLE,        f" {SEP} "),
             (BRIGHT,        hook_msg),
         ]))
+        return
+
+    # State 2b: ADAPTED — Mahoraga recently learned something
+    adapt_age = _file_age(ADAPT_FILE)
+    if adapt_age is not None and adapt_age < ADAPT_MAX_AGE:
+        adapt_msg = _read_file(ADAPT_FILE) or ""
+        GOLD = "\033[38;2;200;170;80m"
+        WHEEL = "\u2638"  # ☸ dharma wheel
+        parts = [(GOLD, f"{WHEEL} {NAME}")]
+        if adapt_msg:
+            parts.append((SUBTLE, f" {SEP} "))
+            parts.append((GOLD, adapt_msg))
+        print(_render(parts))
         return
 
     # State 2: DIM BLUE — session active, currently idle

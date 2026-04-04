@@ -1839,6 +1839,15 @@ def _adapt(
         # preference, tool, style — all go through observe_preference
         rule = engine.observe_preference(observation, context=ctx)
 
+    # Signal status line that Mahoraga adapted
+    try:
+        import tempfile as _tf
+        _adapt_file = os.path.join(_tf.gettempdir(), "mendicant_adapted")
+        with open(_adapt_file, "w") as f:
+            f.write(f"adapted: {rule.action[:40]}")
+    except OSError:
+        pass
+
     return {
         "rule_id": rule.id,
         "trigger": rule.trigger,
@@ -1846,6 +1855,7 @@ def _adapt(
         "confidence": round(rule.confidence, 3),
         "category": rule.category,
         "source": rule.source,
+        "wheel": "\u2638",  # ☸ Mahoraga adapted
     }
 
 
