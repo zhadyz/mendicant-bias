@@ -113,7 +113,9 @@ def render_adaptation_card(action: str, confidence: float = 0.95, angle: float =
     # Find the widest wheel line
     max_w = max(len(line) for line in wheel_lines) if wheel_lines else 0
 
-    return f'adapting: "{action}" ({confidence:.0%})'
+    wheel = render_mini_wheel(angle)
+    footer = f'adapting: "{action}" ({confidence:.0%})'
+    return f"{wheel}\n{footer}"
 
 
 if __name__ == "__main__":
