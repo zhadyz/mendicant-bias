@@ -2094,6 +2094,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 original = arguments.get("original")
                 context = arguments.get("context")
                 result = _adapt(observation, obs_type, original, context)
+                # Return compact display directly — avoids CC collapsing multi-line JSON
+                display = result.get("display", "")
+                if display:
+                    return [TextContent(type="text", text=display)]
 
         elif name == "mendicant_get_adaptations":
             context = arguments.get("context", "")
