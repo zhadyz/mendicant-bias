@@ -313,13 +313,13 @@ def handle_session_start(hook_input: dict) -> dict:
     except OSError:
         pass
 
-    # Inject gateway status (informational, not directive)
+    # System identity block
     context_parts.append(
         f"<mendicant_system>"
         f"\nMendicant Bias V6 — ambient intelligence harness active."
         f"\nGateway: {gateway_status}"
         f"\nHooks: SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop"
-        f"\nAletheia verification: integrated (tier auto-selected by classification)"
+        f"\nAletheia verification: integrated (tier auto-selected by FR5 classification)"
         f"\n</mendicant_system>"
     )
 
