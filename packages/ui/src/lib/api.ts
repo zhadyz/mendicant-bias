@@ -65,3 +65,24 @@ export async function checkHealth() {
   const res = await fetch("/health");
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Brain Dashboard
+// ---------------------------------------------------------------------------
+
+const BRAIN = "/api/brain";
+
+export async function fetchBrainState() {
+  const res = await fetch(`${BRAIN}/state`);
+  return res.json();
+}
+
+export async function fetchBrainMahoraga() {
+  const res = await fetch(`${BRAIN}/mahoraga`);
+  return res.json();
+}
+
+export async function fetchBrainSessions() {
+  const res = await fetch(`${BRAIN}/sessions`);
+  return res.json();
+}

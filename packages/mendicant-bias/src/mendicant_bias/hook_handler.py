@@ -145,6 +145,31 @@ def _signal(name: str, msg: str = "active") -> None:
         pass
 
 
+def _emit_brain_event(event_type: str, payload: dict, session_id: str | None = None) -> None:
+    """Fire-and-forget POST to the gateway's brain event endpoint.
+
+    Used to stream real-time events to the Brain Dashboard via WebSocket.
+    Silently ignores all failures — the dashboard is optional.
+    """
+    try:
+        import urllib.request
+        data = json.dumps({
+            "type": event_type,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
+            "session_id": session_id,
+            "payload": payload,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"{GATEWAY_URL}/internal/brain-event",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=0.5)
+    except Exception:
+        pass
+
+
 def _probe_gateway() -> bool:
     """Check if the gateway is running. Returns True if healthy."""
     try:
@@ -162,9 +187,9 @@ def _probe_gateway() -> bool:
 def _auto_start_gateway() -> bool:
     """Start the gateway in the background if not running. Non-blocking."""
     try:
-        # Use the mendicant CLI to start the gateway
         subprocess.Popen(
-            ["mendicant", "start", "--background"],
+            [sys.executable, "-m", "uvicorn", "mendicant_gateway.app:app",
+             "--host", "0.0.0.0", "--port", "8001"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
@@ -333,6 +358,13 @@ def handle_session_start(hook_input: dict) -> dict:
     # No boot directive. CLAUDE.md provides the cognitive frame.
     # Behavior emerges from the frame + loaded data, not from explicit instructions.
 
+    _emit_brain_event("session_start", {
+        "rule_count": rule_count,
+        "fact_count": fact_count,
+        "pattern_count": pattern_count,
+        "gateway_status": gateway_status,
+    })
+
     return {
         "continue": True,
         "hookSpecificOutput": {
@@ -386,6 +418,13 @@ def handle_user_prompt(hook_input: dict) -> dict:
     except OSError:
         pass
 
+    # Emit classification event to Brain Dashboard
+    _emit_brain_event("classification", {
+        "task_type": task_type,
+        "verification_tier": verification_tier,
+        "prompt_preview": prompt[:80],
+    })
+
     # Inject classification (informational)
     if task_type and task_type != "SIMPLE":
         context_parts.append(
@@ -410,6 +449,11 @@ def handle_user_prompt(hook_input: dict) -> dict:
                 engine.apply_and_track(rule.id)
             context_parts.append(_format_rules(strong))
             _signal("hook_active", f"applied {len(strong)} rules")
+            _emit_brain_event("rule_match", {
+                "rule_count": len(strong),
+                "rule_ids": [r.id for r in strong],
+                "categories": list({r.category for r in strong}),
+            })
 
     if not context_parts:
         return {"continue": True}
@@ -468,6 +512,12 @@ def handle_pre_tool_use(hook_input: dict) -> dict:
     if tool_name not in ("Write", "Edit", "NotebookEdit"):
         return {"continue": True}
 
+    _emit_brain_event("tool_use", {
+        "tool_name": tool_name,
+        "stage": "pre",
+        "file_path": tool_input.get("file_path", ""),
+    })
+
     _signal("hook_active", "checking code rules...")
 
     mendicant_dir = _find_mendicant_dir()
@@ -508,6 +558,12 @@ def handle_post_tool_use(hook_input: dict) -> dict:
     if tool_name not in ("Write", "Edit", "Bash"):
         return {"continue": True}
 
+    _emit_brain_event("tool_use", {
+        "tool_name": tool_name,
+        "stage": "post",
+        "file_path": tool_input.get("file_path", ""),
+    })
+
     mendicant_dir = _find_mendicant_dir()
     context_parts: list[str] = []
 
@@ -542,6 +598,13 @@ def handle_post_tool_use(hook_input: dict) -> dict:
                     verdict = result.get("verdict", "CORRECT")
                     feedback = result.get("feedback", "")
                     confidence = float(result.get("confidence", 0.0))
+
+                    _emit_brain_event("verification", {
+                        "verdict": verdict,
+                        "confidence": confidence,
+                        "tier": verification_tier,
+                        "file_path": tool_input.get("file_path", ""),
+                    })
 
                     if verdict == "FIXABLE" and confidence >= 0.6:
                         context_parts.append(

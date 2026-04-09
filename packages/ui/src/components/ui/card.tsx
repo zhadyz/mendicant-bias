@@ -8,12 +8,14 @@ interface CardProps {
   className?: string;
   glow?: boolean;
   onClick?: () => void;
+  style?: React.CSSProperties;
 }
 
-export function Card({ children, className, glow = false, onClick }: CardProps) {
+export function Card({ children, className, glow = false, onClick, style }: CardProps) {
   return (
     <div
       onClick={onClick}
+      style={style}
       className={cn(
         "forerunner-panel rounded-sm p-5 transition-all duration-300",
         glow && "forerunner-border",
@@ -42,11 +44,12 @@ export function CardHeader({ children, className }: CardHeaderProps) {
 interface CardTitleProps {
   children: ReactNode;
   className?: string;
+  style?: React.CSSProperties;
 }
 
-export function CardTitle({ children, className }: CardTitleProps) {
+export function CardTitle({ children, className, style }: CardTitleProps) {
   return (
-    <h3 className={cn("text-sm font-semibold uppercase tracking-wider text-cyan", className)}>
+    <h3 style={style} className={cn("text-sm font-semibold uppercase tracking-wider text-cyan", className)}>
       {children}
     </h3>
   );

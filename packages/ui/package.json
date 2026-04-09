@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev --port 3000",
     "build": "next build",
+    "build:export": "NEXT_OUTPUT=export next build",
     "start": "next start",
     "lint": "next lint"
   },

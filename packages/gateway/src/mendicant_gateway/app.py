@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from mendicant_core import MendicantConfig, __version__ as core_version
@@ -46,6 +47,13 @@ from mendicant_core.middleware import (
 )
 from mendicant_core.middleware.registry import RegistryQuery
 from mendicant_gateway.hooks import hooks_router
+from mendicant_gateway.brain_routes import brain_router
+from mendicant_gateway.websocket import (
+    brain_websocket,
+    broadcaster,
+    receive_brain_event,
+    BrainEvent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -156,11 +164,16 @@ async def lifespan(app: FastAPI):
     _state["agent_loader"] = _load_agent_loader()
 
     _state["startup_time"] = time.monotonic() - startup_time
+    _state["_app_start"] = time.monotonic()
     logger.info("[Gateway] Startup complete in %.2fs", _state["startup_time"])
+
+    # Start WebSocket heartbeat for Brain Dashboard
+    await broadcaster.start_heartbeat()
 
     yield
 
     # Shutdown
+    await broadcaster.stop_heartbeat()
     _state.clear()
     logger.info("[Gateway] Shutdown complete")
 
@@ -181,8 +194,26 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS — allow Brain Dashboard on localhost:3000
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Phase 3 — Claude Code HTTP hook endpoints
 app.include_router(hooks_router)
+
+# Phase 4 — Brain Dashboard endpoints
+app.include_router(brain_router)
+app.add_api_websocket_route("/ws/brain", brain_websocket)
+
+
+@app.post("/internal/brain-event")
+async def _brain_event_ingest(event: BrainEvent):
+    """Internal endpoint — receives events from hook_handler and broadcasts via WebSocket."""
+    return await receive_brain_event(event)
 
 
 # ---------------------------------------------------------------------------
@@ -612,6 +643,50 @@ async def recommend_strategy(request: RecommendRequest):
         recommendations=cleaned,
         count=len(cleaned),
     )
+
+
+# ---------------------------------------------------------------------------
+# Static UI — serve built Next.js export if available
+# ---------------------------------------------------------------------------
+
+
+def _find_ui_dist() -> Path | None:
+    """Locate the built UI static export."""
+    candidates = [
+        Path(__file__).resolve().parent.parent.parent.parent / "ui" / "out",
+        Path.cwd() / "packages" / "ui" / "out",
+    ]
+    for p in candidates:
+        if p.exists() and (p / "index.html").exists():
+            return p
+    return None
+
+
+_ui_dist = _find_ui_dist()
+if _ui_dist:
+    from starlette.staticfiles import StaticFiles
+    from starlette.responses import FileResponse
+
+    # Serve Next.js static assets (JS/CSS bundles)
+    _next_dir = _ui_dist / "_next"
+    if _next_dir.exists():
+        app.mount("/_next", StaticFiles(directory=str(_next_dir)), name="next-assets")
+
+    @app.get("/{path:path}")
+    async def _serve_ui(path: str):
+        """Serve the built UI — falls back to index.html for client-side routing."""
+        # Try exact file
+        file_path = _ui_dist / path
+        if file_path.is_file():
+            return FileResponse(str(file_path))
+        # Try directory index
+        index = _ui_dist / path / "index.html"
+        if index.is_file():
+            return FileResponse(str(index))
+        # Fallback to root for SPA routing
+        return FileResponse(str(_ui_dist / "index.html"))
+
+    logger.info("[Gateway] Serving UI from %s", _ui_dist)
 
 
 # ---------------------------------------------------------------------------

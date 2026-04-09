@@ -117,10 +117,18 @@ def serve(ctx: click.Context, host: Optional[str], port: Optional[int]) -> None:
     final_host = host or gw.get("host", "0.0.0.0")
     final_port = port or gw.get("port", 8001)
 
+    # Check if built UI exists
+    ui_dist = Path.cwd() / "packages" / "ui" / "out"
+    has_ui = ui_dist.exists() and (ui_dist / "index.html").exists()
+
     console.print(f"[bold cyan]Starting Mendicant Bias[/bold cyan]")
-    console.print(f"  Gateway : http://{final_host}:{final_port}")
-    console.print(f"  MCP     : available via [bold]mendicant mcp[/bold] (stdio)")
-    console.print(f"  Config  : {ctx.obj['config_path']}")
+    console.print(f"  Gateway   : http://{final_host}:{final_port}")
+    if has_ui:
+        console.print(f"  Dashboard : http://{final_host}:{final_port}/workspace/brain")
+    else:
+        console.print(f"  Dashboard : [dim]not built (run: cd packages/ui && pnpm build:export)[/dim]")
+    console.print(f"  MCP       : available via [bold]mendicant mcp[/bold] (stdio)")
+    console.print(f"  Config    : {ctx.obj['config_path']}")
     console.print()
 
     try:
@@ -138,6 +146,89 @@ def serve(ctx: click.Context, host: Optional[str], port: Optional[int]) -> None:
         port=final_port,
         log_level="info",
     )
+
+
+# ---------------------------------------------------------------------------
+# mendicant dev
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option("--host", default=None, help="Gateway host (default from config)")
+@click.option("--port", default=None, type=int, help="Gateway port (default from config)")
+@click.option("--ui-port", default=3000, type=int, help="UI dev server port (default 3000)")
+@click.pass_context
+def dev(ctx: click.Context, host: Optional[str], port: Optional[int], ui_port: int) -> None:
+    """Start gateway + UI dev server with hot reload."""
+    import signal
+
+    _print_banner()
+    config = ctx.obj["config"]
+    gw = config.get("gateway", {})
+    final_host = host or gw.get("host", "0.0.0.0")
+    final_port = port or gw.get("port", 8001)
+
+    # Find UI package
+    ui_dir = Path.cwd() / "packages" / "ui"
+    if not (ui_dir / "package.json").exists():
+        console.print("[red]Error:[/red] packages/ui not found. Run from the repo root.")
+        raise SystemExit(1)
+
+    console.print("[bold cyan]Starting Mendicant Bias (dev mode)[/bold cyan]")
+    console.print(f"  Gateway   : http://{final_host}:{final_port}")
+    console.print(f"  Dashboard : http://localhost:{ui_port}/workspace/brain")
+    console.print(f"  Config    : {ctx.obj['config_path']}")
+    console.print()
+
+    procs: list[subprocess.Popen] = []
+
+    def _cleanup(*_):
+        for p in procs:
+            try:
+                p.terminate()
+            except OSError:
+                pass
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGINT, _cleanup)
+    signal.signal(signal.SIGTERM, _cleanup)
+
+    try:
+        # Start gateway with uvicorn (reload enabled)
+        gw_proc = subprocess.Popen(
+            [
+                sys.executable, "-m", "uvicorn",
+                "mendicant_gateway.app:app",
+                "--host", final_host,
+                "--port", str(final_port),
+                "--reload",
+            ],
+        )
+        procs.append(gw_proc)
+
+        # Start Next.js dev server
+        # Use npx to ensure next is found from node_modules
+        ui_proc = subprocess.Popen(
+            ["npx", "next", "dev", "--port", str(ui_port)],
+            cwd=str(ui_dir),
+        )
+        procs.append(ui_proc)
+
+        console.print("[green]Both services started. Ctrl+C to stop.[/green]")
+
+        # Wait for either to exit
+        while True:
+            for p in procs:
+                ret = p.poll()
+                if ret is not None:
+                    console.print(f"[yellow]Process exited with code {ret}. Shutting down...[/yellow]")
+                    _cleanup()
+            import time
+            time.sleep(1)
+
+    except Exception as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        _cleanup()
 
 
 # ---------------------------------------------------------------------------

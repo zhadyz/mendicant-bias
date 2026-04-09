@@ -8,12 +8,14 @@ import {
   MessageSquare,
   Users,
   Layers,
+  Brain,
   Hexagon,
   ChevronLeft,
 } from "lucide-react";
 
 const NAV_ITEMS = [
   { href: "/workspace", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/workspace/brain", label: "Brain", icon: Brain },
   { href: "/workspace/chat", label: "Chat", icon: MessageSquare },
   { href: "/workspace/agents", label: "Agents", icon: Users },
   { href: "/workspace/middleware", label: "Middleware", icon: Layers },
