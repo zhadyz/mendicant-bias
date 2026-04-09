@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mendicant-bias"
-version = "6.0.0"
+version = "6.1.0"
 description = "Mendicant Bias — Ambient intelligence harness for Claude Code with integrated Aletheia verification"
 readme = "README.md"
 license = "MIT"
