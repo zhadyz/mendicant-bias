@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mendicant-mcp-server"
+version = "5.0.0"
+description = "Mendicant Bias MCP Server — Intelligence middleware for Claude Code"
+requires-python = ">=3.11"
+dependencies = [
+    "mendicant-core>=5.0.0",
+    "mcp>=1.0.0",
+    "pydantic>=2.0",
+]
+
+[project.scripts]
+mendicant-mcp = "mendicant_mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mendicant_mcp"]

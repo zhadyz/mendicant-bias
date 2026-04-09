@@ -1,0 +1,27 @@
+{
+  "name": "mendicant-bias",
+  "version": "5.5.0",
+  "description": "Mendicant Bias — Contender-class intelligence middleware for Claude Code",
+  "author": {
+    "name": "mendicant-bias"
+  },
+  "homepage": "https://github.com/zhadyz/mendicant-bias",
+  "keywords": [
+    "mendicant-bias",
+    "middleware",
+    "intelligence",
+    "agents",
+    "verification",
+    "semantic-routing",
+    "adaptive-learning",
+    "context-budget",
+    "task-routing"
+  ],
+  "mcpServers": {
+    "mendicant-bias": {
+      "command": "mendicant",
+      "args": ["mcp"],
+      "env": {}
+    }
+  }
+}

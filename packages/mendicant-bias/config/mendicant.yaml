@@ -1,0 +1,56 @@
+# Mendicant Bias V5 Configuration
+# ================================
+
+system:
+  name: mendicant-bias
+  version: "5.0.0"
+
+# Runtime settings
+runtime:
+  model: claude-sonnet-4-20250514
+  max_turns: 25
+  thinking_enabled: true
+
+# Middleware configuration (FR1-FR5)
+mendicant:
+  semantic_tool_router:
+    registry_path: .mendicant/tool_registry.json
+    embedding_model: all-MiniLM-L6-v2
+    top_k: 5
+    similarity_threshold: 0.4
+
+  verification:
+    enabled: true
+    model: claude-sonnet-4-20250514
+    temperature: 0.1
+    min_score: 0.7
+    max_retries: 2
+
+  adaptive_learning:
+    store_path: .mendicant/orchestration_patterns.json
+    max_patterns: 1000
+    min_success_rate: 0.6
+    embedding_model: all-MiniLM-L6-v2
+
+  context_budget:
+    default_budget: 30000
+    strategies:
+      - key_fields
+      - statistical_summary
+      - truncation
+
+  smart_task_router:
+    patterns_store_path: .mendicant/orchestration_patterns.json
+    embedding_model: all-MiniLM-L6-v2
+    embedding_weight: 0.5
+    min_embedding_similarity: 0.55
+
+# Gateway settings
+gateway:
+  host: "0.0.0.0"
+  port: 8001
+
+# Agent settings
+agents:
+  profiles_dir: agents/profiles
+  mapping_path: agents/agent_mapping.json

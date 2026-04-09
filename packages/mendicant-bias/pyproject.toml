@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mendicant-bias"
+version = "6.0.0"
+description = "Mendicant Bias — Ambient intelligence harness for Claude Code with integrated Aletheia verification"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+    { name = "Mendicant Bias Project" },
+]
+keywords = [
+    "ai", "agents", "middleware", "claude-code", "mendicant",
+    "langgraph", "mcp", "verification", "semantic-routing",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "License :: OSI Approved :: MIT License",
+]
+
+dependencies = [
+    "mendicant-core>=5.0.0",
+    "mendicant-mcp-server>=5.0.0",
+    "click>=8.0",
+    "rich>=13.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+full = [
+    "mendicant-runtime>=5.0.0",
+    "mendicant-gateway>=5.0.0",
+]
+embeddings = [
+    "sentence-transformers>=3.0.0",
+]
+all = [
+    "mendicant-bias[full,embeddings]",
+]
+
+[project.scripts]
+mendicant = "mendicant_bias.cli:cli"
+
+[project.urls]
+Homepage = "https://github.com/zhadyz/mendicant-bias"
+Repository = "https://github.com/zhadyz/mendicant-bias"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mendicant_bias"]

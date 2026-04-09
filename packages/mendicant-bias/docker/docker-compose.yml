@@ -1,0 +1,16 @@
+version: "3.8"
+services:
+  mendicant:
+    build:
+      context: ../..
+      dockerfile: packages/mendicant-bias/docker/Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - MENDICANT_CONFIG_PATH=/app/mendicant.yaml
+    volumes:
+      - mendicant-data:/app/.mendicant
+
+volumes:
+  mendicant-data:
