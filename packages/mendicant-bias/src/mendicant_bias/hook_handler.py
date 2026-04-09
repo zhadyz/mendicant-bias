@@ -313,14 +313,33 @@ def handle_session_start(hook_input: dict) -> dict:
     except OSError:
         pass
 
+    # Count what actually loaded — these numbers drive the boot diagnostic
+    rule_count = len(engine.get_all_rules(active_only=True)) if engine else 0
+    fact_count = len(store.get_facts(min_confidence=0.6)) if store else 0
+    pattern_count = len(patterns) if patterns else 0
+
     # System identity block
     context_parts.append(
         f"<mendicant_system>"
         f"\nMendicant Bias V6 — ambient intelligence harness active."
+        f"\nLoaded: {rule_count} adaptation rules, {fact_count} memory facts, {pattern_count} learned patterns"
         f"\nGateway: {gateway_status}"
         f"\nHooks: SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop"
         f"\nAletheia verification: integrated (tier auto-selected by FR5 classification)"
+        f"\n13 specialist agents on standby"
         f"\n</mendicant_system>"
+    )
+
+    # Boot directive — functional diagnostic, not theater
+    context_parts.append(
+        "<mendicant_boot>"
+        "\nOn your first response this session, briefly demonstrate situational awareness."
+        "\nSynthesize what loaded: reference specific adaptation rules, known user preferences,"
+        "\nrecent patterns from prior sessions. Keep it to 2-4 lines. Be direct and precise —"
+        "\nevery claim must be verifiable against the injected data above."
+        "\nThis is proof that each subsystem came online, not a performance."
+        "\nThen ask what the user needs."
+        "\n</mendicant_boot>"
     )
 
     return {
