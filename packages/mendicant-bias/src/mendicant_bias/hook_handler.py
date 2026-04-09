@@ -330,17 +330,8 @@ def handle_session_start(hook_input: dict) -> dict:
         f"\n</mendicant_system>"
     )
 
-    # Boot directive — functional diagnostic, not theater
-    context_parts.append(
-        "<mendicant_boot>"
-        "\nOn your first response this session, briefly demonstrate situational awareness."
-        "\nSynthesize what loaded: reference specific adaptation rules, known user preferences,"
-        "\nrecent patterns from prior sessions. Keep it to 2-4 lines. Be direct and precise —"
-        "\nevery claim must be verifiable against the injected data above."
-        "\nThis is proof that each subsystem came online, not a performance."
-        "\nThen ask what the user needs."
-        "\n</mendicant_boot>"
-    )
+    # No boot directive. CLAUDE.md provides the cognitive frame.
+    # Behavior emerges from the frame + loaded data, not from explicit instructions.
 
     return {
         "continue": True,
